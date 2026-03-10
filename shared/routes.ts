@@ -1,0 +1,78 @@
+import { z } from 'zod';
+import { players, insertPlayerSchema, messageSchema } from './schema';
+
+export const errorSchemas = {
+  validation: z.object({
+    message: z.string(),
+    field: z.string().optional(),
+  }),
+  notFound: z.object({
+    message: z.string(),
+  }),
+};
+
+export const api = {
+  players: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/players',
+      input: z.object({
+        level: z.string().optional(),
+      }).optional(),
+      responses: {
+        200: z.array(z.custom<typeof players.$inferSelect>()),
+      },
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/players',
+      input: insertPlayerSchema,
+      responses: {
+        201: z.custom<typeof players.$inferSelect>(),
+        400: errorSchemas.validation,
+      },
+    },
+    update: {
+      method: 'PATCH' as const,
+      path: '/api/players/:id',
+      input: insertPlayerSchema.partial(),
+      responses: {
+        200: z.custom<typeof players.$inferSelect>(),
+        400: errorSchemas.validation,
+        404: errorSchemas.notFound,
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/players/:id',
+      responses: {
+        204: z.void(),
+        404: errorSchemas.notFound,
+      },
+    },
+  },
+  whatsapp: {
+    send: {
+      method: 'POST' as const,
+      path: '/api/whatsapp/send',
+      input: messageSchema,
+      responses: {
+        200: z.object({ success: z.boolean(), url: z.string() }),
+      },
+    },
+  },
+};
+
+export function buildUrl(path: string, params?: Record<string, string | number>): string {
+  let url = path;
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      if (url.includes(`:${key}`)) {
+        url = url.replace(`:${key}`, String(value));
+      }
+    });
+  }
+  return url;
+}
+
+export type PlayerResponse = z.infer<typeof api.players.list.responses[200]>[number];

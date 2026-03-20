@@ -83,6 +83,32 @@ export async function registerRoutes(
     });
   });
 
+  // Health check endpoint (no authentication required)
+  app.get("/api/health", (req, res) => {
+    res.json({ 
+      status: "ok", 
+      timestamp: new Date().toISOString(),
+      database: databaseUrl ? "configured" : "not configured"
+    });
+  });
+
+  // Debug session endpoint
+  app.get("/api/debug/session", (req, res) => {
+    try {
+      res.json({
+        hasSession: !!req.session,
+        sessionData: req.session ? {
+          id: req.sessionID,
+          userId: (req.session as any).userId,
+          userEmail: (req.session as any).userEmail
+        } : null
+      });
+    } catch (err) {
+      console.error("[debug/session] error:", err);
+      res.status(500).json({ message: "Error", error: String(err) });
+    }
+  });
+
   // Auth routes
   app.post("/api/auth/login", async (req, res) => {
     try {

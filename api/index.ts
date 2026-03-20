@@ -23,33 +23,79 @@ app.use(
 
 app.use(express.urlencoded({ limit: "100mb", extended: false }));
 
-// Initialize routes synchronously
-let initPromise: Promise<void> | null = null;
+// Logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  const path = req.path;
+  let capturedJsonResponse: any = undefined;
 
-function getInitPromise() {
-  if (!initPromise) {
-    initPromise = registerRoutes(httpServer, app).then(() => {
+  const originalResJson = res.json;
+  res.json = function (bodyJson: any, ...args: any[]) {
+    capturedJsonResponse = bodyJson;
+    return originalResJson.apply(res, [bodyJson, ...args]);
+  };
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    if (path.startsWith("/api")) {
+      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      if (capturedJsonResponse) {
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      }
+      console.log(logLine);
+    }
+  });
+
+  next();
+});
+
+// Track initialization
+let initPromise: Promise<void> | null = null;
+let isReady = false;
+
+// Initialize routes in parallel as soon as module loads
+(() => {
+  console.log("[init] starting initialization");
+  initPromise = (async () => {
+    try {
+      console.log("[init] registering routes");
+      await registerRoutes(httpServer, app);
+      console.log("[init] routes registered successfully");
+      
+      // Register error handler AFTER routes
       app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
         const status = err.status || err.statusCode || 500;
         const message = err.message || "Internal Server Error";
-        console.error("[error-handler]", status, message);
+        console.error("[error-handler]", status, message, err);
         res.status(status).json({ message });
       });
-    }).catch((err) => {
-      console.error("[init] failed:", err);
-      throw err;
-    });
-  }
-  return initPromise;
-}
+      
+      isReady = true;
+    } catch (err) {
+      console.error("[init] failed to register routes:", err);
+      isReady = false;
+    }
+  })();
+})();
 
-// Start initialization immediately
-getInitPromise().catch((err) => {
-  console.error("[startup] failed to initialize:", err);
+// Middleware to wait for initialization if needed
+app.use((req, res, next) => {
+  if (isReady) {
+    next();
+  } else if (initPromise) {
+    initPromise.then(() => {
+      next();
+    }).catch((err) => {
+      console.error("[middleware] init failed:", err);
+      next();
+    });
+  } else {
+    next();
+  }
 });
 
 export default function handler(req: Request, res: Response) {
-  console.log("[handler] request:", req.method, req.url);
+  console.log("[handler]", req.method, req.url);
   try {
     app(req, res);
   } catch (error) {
@@ -59,6 +105,9 @@ export default function handler(req: Request, res: Response) {
         message: "Internal Server Error", 
         error: String(error) 
       });
+    }
+  }
+}
     }
   }
 }

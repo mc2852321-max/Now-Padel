@@ -48,6 +48,11 @@ async function ensureInitialized() {
 }
 
 export default async function handler(req: Request, res: Response) {
-  await ensureInitialized();
-  return app(req, res);
+  try {
+    await ensureInitialized();
+    app(req, res);
+  } catch (error) {
+    console.error("[handler] error:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
 }

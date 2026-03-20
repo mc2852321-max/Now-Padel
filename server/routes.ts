@@ -120,6 +120,9 @@ export async function registerRoutes(
 
   app.post("/api/auth/logout", (req, res) => {
     try {
+      if (!req.session) {
+        return res.status(500).json({ message: "Session não disponível" });
+      }
       req.session.destroy((err) => {
         if (err) {
           console.error("[auth/logout] session destroy error:", err);
@@ -135,9 +138,14 @@ export async function registerRoutes(
 
   app.get("/api/auth/user", (req, res) => {
     try {
-      if (req.session && (req.session as any).userId) {
+      if (!req.session) {
+        console.warn("[auth/user] session not available");
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+      const userId = (req.session as any).userId;
+      if (userId) {
         res.json({
-          id: (req.session as any).userId,
+          id: userId,
           email: (req.session as any).userEmail,
           name: (req.session as any).userName,
         });

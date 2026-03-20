@@ -9,9 +9,22 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import pg from "pg";
 
+const databaseUrl =
+  process.env.DATABASE_URL ||
+  process.env.POSTGRES_URL ||
+  process.env.POSTGRES_PRISMA_URL ||
+  process.env.POSTGRES_URL_NON_POOLING ||
+  process.env.POSTGRES_URL_NO_SSL;
+
+const shouldUseSsl =
+  Boolean(process.env.VERCEL) ||
+  Boolean(databaseUrl && /neon\.tech/i.test(databaseUrl)) ||
+  Boolean(databaseUrl && /sslmode=require/i.test(databaseUrl));
+
 // Session pool for PostgreSQL
 const pgPool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: databaseUrl,
+  ssl: shouldUseSsl ? { rejectUnauthorized: false } : undefined,
 });
 
 // Custom authentication middleware
@@ -392,13 +405,18 @@ export async function registerRoutes(
   });
 
   // Seed data with new levels
-  const existing = await storage.getPlayers();
-  if (existing.length === 0) {
-    await storage.createPlayer({ name: "João Silva", phone: "912345678", level: "M5", notes: "Excelente backhand" });
-    await storage.createPlayer({ name: "Maria Santos", phone: "923456789", level: "F3", notes: "Precisa treinar o smash" });
-    await storage.createPlayer({ name: "Pedro Costa", phone: "934567890", level: "M4", notes: "Jogador regular" });
-    await storage.createPlayer({ name: "Ana Oliveira", phone: "961234567", level: "F6", notes: "Nível de competição" });
+  try {
+    const existing = await storage.getPlayers();
+    if (existing.length === 0) {
+      await storage.createPlayer({ name: "João Silva", phone: "912345678", level: "M5", notes: "Excelente backhand" });
+      await storage.createPlayer({ name: "Maria Santos", phone: "923456789", level: "F3", notes: "Precisa treinar o smash" });
+      await storage.createPlayer({ name: "Pedro Costa", phone: "934567890", level: "M4", notes: "Jogador regular" });
+      await storage.createPlayer({ name: "Ana Oliveira", phone: "961234567", level: "F6", notes: "Nível de competição" });
+    }
+  } catch (error) {
+    console.error("[startup] skipping seed data:", error);
   }
 
   return httpServer;
 }
+

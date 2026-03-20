@@ -119,23 +119,34 @@ export async function registerRoutes(
   });
 
   app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ message: "Erro ao terminar sessão" });
-      }
-      res.json({ success: true });
-    });
+    try {
+      req.session.destroy((err) => {
+        if (err) {
+          console.error("[auth/logout] session destroy error:", err);
+          return res.status(500).json({ message: "Erro ao terminar sessão" });
+        }
+        res.json({ success: true });
+      });
+    } catch (err) {
+      console.error("[auth/logout] error:", err);
+      res.status(500).json({ message: "Erro interno" });
+    }
   });
 
   app.get("/api/auth/user", (req, res) => {
-    if (req.session && (req.session as any).userId) {
-      res.json({
-        id: (req.session as any).userId,
-        email: (req.session as any).userEmail,
-        name: (req.session as any).userName,
-      });
-    } else {
-      res.status(401).json({ message: "Not authenticated" });
+    try {
+      if (req.session && (req.session as any).userId) {
+        res.json({
+          id: (req.session as any).userId,
+          email: (req.session as any).userEmail,
+          name: (req.session as any).userName,
+        });
+      } else {
+        res.status(401).json({ message: "Not authenticated" });
+      }
+    } catch (err) {
+      console.error("[auth/user] error:", err);
+      res.status(500).json({ message: "Erro interno" });
     }
   });
 

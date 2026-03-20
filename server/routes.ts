@@ -48,13 +48,7 @@ export async function registerRoutes(
   app.set('trust proxy', 1);
 
   // Set up session middleware
-  const PgSession = connectPgSimple(session);
-  app.use(session({
-    store: new PgSession({
-      pool: pgPool,
-      tableName: 'sessions',
-      createTableIfMissing: true,
-    }),
+  const sessionConfig: session.SessionOptions = {
     secret: process.env.SESSION_SECRET || 'padel-club-secret',
     resave: false,
     saveUninitialized: false,
@@ -64,7 +58,28 @@ export async function registerRoutes(
       sameSite: 'none',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     },
-  }));
+  };
+
+  if (databaseUrl) {
+    const PgSession = connectPgSimple(session);
+    sessionConfig.store = new PgSession({
+      pool: pgPool,
+      tableName: 'sessions',
+      createTableIfMissing: true,
+    });
+  }
+
+  const sessionMiddleware = session(sessionConfig);
+  app.use((req, res, next) => {
+    sessionMiddleware(req, res, (err) => {
+      if (err) {
+        // Avoid taking down auth check endpoint if session store is temporarily unavailable.
+        console.error("[session] middleware error:", err);
+        return next();
+      }
+      next();
+    });
+  });
 
   // Auth routes
   app.post("/api/auth/login", async (req, res) => {

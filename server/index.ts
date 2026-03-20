@@ -67,13 +67,7 @@ app.use((req, res, next) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
-    console.error("[error-handler] status:", status, "message:", message);
-    console.error("[error-handler] stack:", err.stack);
-    console.error("[error-handler] full error:", err);
-    
-    if (!res.headersSent) {
-      res.status(status).json({ message, error: process.env.NODE_ENV === "development" ? err.toString() : undefined });
-    }
+    res.status(status).json({ message });
   });
 
   // importantly only setup vite in development and after

@@ -73,64 +73,18 @@ export async function registerRoutes(
 
   const sessionMiddleware = session(sessionConfig);
   app.use((req, res, next) => {
-    try {
-      sessionMiddleware(req, res, (err) => {
-        if (err) {
-          console.error("[session] middleware error:", err);
-          // Don't fail the request, continue without session
-          return next();
-        }
-        console.log("[session] middleware ok, hasSession:", !!req.session);
-        next();
-      });
-    } catch (err) {
-      console.error("[session] middleware exception:", err);
+    sessionMiddleware(req, res, (err) => {
+      if (err) {
+        console.error("[session] middleware error:", err);
+        return next();
+      }
       next();
-    }
+    });
   });
 
-  // Health check endpoint (no authentication required)
+  // Health check endpoint
   app.get("/api/health", (req, res) => {
-    console.log("[health] checking...");
-    try {
-      res.json({ 
-        status: "ok", 
-        timestamp: new Date().toISOString(),
-        database: databaseUrl ? "configured" : "not configured",
-        hasSession: !!req.session
-      });
-    } catch (err) {
-      console.error("[health] error:", err);
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
-  // Debug session endpoint
-  app.get("/api/debug/session", (req, res) => {
-    console.log("[debug/session] checking...");
-    try {
-      const sessionData = req.session ? {
-        id: req.sessionID,
-        userId: (req.session as any).userId,
-        userEmail: (req.session as any).userEmail,
-        data: Object.keys(req.session)
-      } : null;
-      
-      res.json({
-        hasSession: !!req.session,
-        sessionData,
-        headers: req.headers
-      });
-    } catch (err) {
-      console.error("[debug/session] error:", err);
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
-  // Simple echo endpoint
-  app.get("/api/echo", (req, res) => {
-    console.log("[echo] request received");
-    res.json({ echo: "ok", path: req.path, method: req.method });
+    res.json({ status: "ok" });
   });
 
   // Auth routes
@@ -187,31 +141,19 @@ export async function registerRoutes(
   });
 
   app.get("/api/auth/user", (req, res) => {
-    console.log("[auth/user] request received, hasSession:", !!req.session);
     try {
-      if (!req.session) {
-        console.warn("[auth/user] session not available");
-        return res.status(401).json({ message: "Not authenticated" });
-      }
-      
-      const userId = (req.session as any).userId;
-      console.log("[auth/user] userId:", userId);
-      
-      if (userId) {
-        const userData = {
-          id: userId,
+      if (req.session && (req.session as any).userId) {
+        res.json({
+          id: (req.session as any).userId,
           email: (req.session as any).userEmail,
           name: (req.session as any).userName,
-        };
-        console.log("[auth/user] returning user data:", userData);
-        res.json(userData);
+        });
       } else {
-        console.log("[auth/user] no userId in session");
         res.status(401).json({ message: "Not authenticated" });
       }
     } catch (err) {
-      console.error("[auth/user] caught error:", err, "Stack:", (err as any).stack);
-      res.status(500).json({ message: "Erro interno", error: String(err) });
+      console.error("[auth/user] error:", err);
+      res.status(500).json({ message: "Erro interno" });
     }
   });
 

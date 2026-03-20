@@ -21,12 +21,6 @@ const shouldUseSsl =
   Boolean(databaseUrl && /neon\.tech/i.test(databaseUrl)) ||
   Boolean(databaseUrl && /sslmode=require/i.test(databaseUrl));
 
-// Session pool for PostgreSQL
-const pgPool = new pg.Pool({
-  connectionString: databaseUrl,
-  ssl: shouldUseSsl ? { rejectUnauthorized: false } : undefined,
-});
-
 // Custom authentication middleware
 const isAuthenticated: RequestHandler = (req, res, next) => {
   if (req.session && (req.session as any).userId) {
@@ -61,12 +55,20 @@ export async function registerRoutes(
   };
 
   if (databaseUrl) {
-    const PgSession = connectPgSimple(session);
-    sessionConfig.store = new PgSession({
-      pool: pgPool,
-      tableName: 'sessions',
-      createTableIfMissing: true,
-    });
+    try {
+      const pgPool = new pg.Pool({
+        connectionString: databaseUrl,
+        ssl: shouldUseSsl ? { rejectUnauthorized: false } : undefined,
+      });
+      const PgSession = connectPgSimple(session);
+      sessionConfig.store = new PgSession({
+        pool: pgPool,
+        tableName: 'sessions',
+        createTableIfMissing: true,
+      });
+    } catch (error) {
+      console.error("[session] failed to initialize postgres session store:", error);
+    }
   }
 
   const sessionMiddleware = session(sessionConfig);

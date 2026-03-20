@@ -49,10 +49,15 @@ async function ensureInitialized() {
 
 export default async function handler(req: Request, res: Response) {
   try {
+    console.log("[handler] received request:", req.method, req.url);
     await ensureInitialized();
+    console.log("[handler] initialized, calling app");
     app(req, res);
+    console.log("[handler] request processed");
   } catch (error) {
     console.error("[handler] error:", error);
-    res.status(500).json({ message: "Internal Server Error" });
+    if (!res.headersSent) {
+      res.status(500).json({ message: "Internal Server Error", error: String(error) });
+    }
   }
 }

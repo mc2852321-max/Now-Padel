@@ -901,8 +901,6 @@ export default function Nonstop() {
             </CardContent>
           </Card>
         </div>
-      </div>
-
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {Array.from({ length: numRounds }).map((_, rIdx) => {
           const roundNum = rIdx + 1;
@@ -996,6 +994,7 @@ export default function Nonstop() {
             </Card>
           );
         })}
+      </div>
       </div>
 
       <Dialog open={!!editingTeam} onOpenChange={() => setEditingTeam(null)}>

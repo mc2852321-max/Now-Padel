@@ -543,20 +543,24 @@ export async function registerRoutes(
       )
     `);
 
-    const bootstrapEmail = "marcelo_cristovao@live.com.pt";
-    const bootstrapPassword = "Teste1";
+    const bootstrapUsers = [
+      { email: "marcelo_cristovao@live.com.pt", name: "Marcelo Cristovao", password: "Teste1" },
+      { email: "nowpadel@gmail.com", name: "Now Padel", password: "teste1" },
+    ];
 
-    let bootstrapUser = await storage.getAuthorizedUserByEmail(bootstrapEmail);
-    if (!bootstrapUser) {
-      bootstrapUser = await storage.createAuthorizedUser({
-        email: bootstrapEmail,
-        name: "Marcelo Cristovao",
-      });
-    }
+    for (const bootstrap of bootstrapUsers) {
+      let bootstrapUser = await storage.getAuthorizedUserByEmail(bootstrap.email);
+      if (!bootstrapUser) {
+        bootstrapUser = await storage.createAuthorizedUser({
+          email: bootstrap.email,
+          name: bootstrap.name,
+        });
+      }
 
-    if (!bootstrapUser.password) {
-      const hashedPassword = await bcrypt.hash(bootstrapPassword, 10);
-      await storage.setUserPassword(bootstrapUser.id, hashedPassword);
+      if (!bootstrapUser.password) {
+        const hashedPassword = await bcrypt.hash(bootstrap.password, 10);
+        await storage.setUserPassword(bootstrapUser.id, hashedPassword);
+      }
     }
     const existing = await storage.getPlayers();
     if (existing.length === 0) {

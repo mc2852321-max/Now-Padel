@@ -857,50 +857,50 @@ export default function Nonstop() {
       </div>
 
       <div className="space-y-6">
-      
-      <Card className="overflow-hidden border-2 border-slate-800 md:sticky md:top-24 md:z-30 bg-background">
-        <CardHeader className="bg-slate-900 text-white p-4">
-          <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader className="bg-orange-600 text-white">
-              <TableRow className="hover:bg-orange-600">
-                <TableHead className="text-white font-bold uppercase py-2 px-4 min-w-[220px]">Duplas</TableHead>
-                {Array.from({ length: numRounds }).map((_, i) => (
-                  <TableHead key={i} className="text-white font-bold text-center border-l border-orange-500">Ronda {i + 1}</TableHead>
-                ))}
-                <TableHead className="text-white font-bold text-center border-l border-orange-500">JG</TableHead>
-                <TableHead className="text-white font-bold text-center border-l border-orange-500">JP</TableHead>
-                <TableHead className="text-white font-bold text-center border-l border-orange-500">DIF.</TableHead>
-                <TableHead className="text-white font-bold text-center border-l border-orange-500 w-20">Pontos</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {stats.map((s: any) => (
-                <TableRow key={s.teamId} className="hover:bg-slate-50">
-                  <TableCell className="font-medium py-2 px-3 text-sm">{s.name}</TableCell>
-                  {s.sequence.map((char: string, i: number) => (
-                    <TableCell key={i} className={cn(
-                      "text-center font-bold border-l w-20",
-                      char === 'V' ? "bg-green-100 text-green-700" :
-                      char === 'D' ? "bg-red-100 text-red-700" : 
-                      char === 'E' ? "bg-yellow-100 text-yellow-700" : ""
-                    )}>
-                      {char}
-                    </TableCell>
+        <div className="sticky top-24 z-30">
+          <Card className="overflow-hidden border-2 border-slate-800 bg-background shadow-lg">
+            <CardHeader className="bg-slate-900 text-white p-3">
+              <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 max-h-[42vh] overflow-auto">
+              <Table>
+                <TableHeader className="bg-orange-600 text-white">
+                  <TableRow className="hover:bg-orange-600">
+                    <TableHead className="text-white font-bold uppercase py-2 px-4 min-w-[220px]">Duplas</TableHead>
+                    {Array.from({ length: numRounds }).map((_, i) => (
+                      <TableHead key={i} className="text-white font-bold text-center border-l border-orange-500">Ronda {i + 1}</TableHead>
+                    ))}
+                    <TableHead className="text-white font-bold text-center border-l border-orange-500">JG</TableHead>
+                    <TableHead className="text-white font-bold text-center border-l border-orange-500">JP</TableHead>
+                    <TableHead className="text-white font-bold text-center border-l border-orange-500">DIF.</TableHead>
+                    <TableHead className="text-white font-bold text-center border-l border-orange-500 w-20">Pontos</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {stats.map((s: any) => (
+                    <TableRow key={s.teamId} className="hover:bg-slate-50">
+                      <TableCell className="font-medium py-2 px-3 text-sm">{s.name}</TableCell>
+                      {s.sequence.map((char: string, i: number) => (
+                        <TableCell key={i} className={cn(
+                          "text-center font-bold border-l w-20",
+                          char === 'V' ? "bg-green-100 text-green-700" :
+                          char === 'D' ? "bg-red-100 text-red-700" : 
+                          char === 'E' ? "bg-yellow-100 text-yellow-700" : ""
+                        )}>
+                          {char}
+                        </TableCell>
+                      ))}
+                      <TableCell className="text-center border-l w-14">{s.gamesWon}</TableCell>
+                      <TableCell className="text-center border-l w-14">{s.gamesLost}</TableCell>
+                      <TableCell className="text-center border-l w-14">{s.gamesWon - s.gamesLost}</TableCell>
+                      <TableCell className="text-center font-bold border-l bg-slate-50 w-20">{s.points}</TableCell>
+                    </TableRow>
                   ))}
-                  <TableCell className="text-center border-l w-14">{s.gamesWon}</TableCell>
-                  <TableCell className="text-center border-l w-14">{s.gamesLost}</TableCell>
-                  <TableCell className="text-center border-l w-14">{s.gamesWon - s.gamesLost}</TableCell>
-                  <TableCell className="text-center font-bold border-l bg-slate-50 w-20">{s.points}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

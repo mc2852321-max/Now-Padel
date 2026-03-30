@@ -52,6 +52,10 @@ export default function Nonstop() {
   const numCourts = settings?.nonstopCourts || 3;
   const numTeams = numCourts * 2;
   const numRounds = settings?.nonstopRounds || 5;
+  const warmupMinutes = settings?.warmupTime ?? 5;
+  const gameMinutes = settings?.gameTime ?? 20;
+  const restMinutes = settings?.restTime ?? 2;
+  const totalRounds = settings?.nonstopRounds ?? 5;
 
   const playSound = (type: 'start-warmup' | 'start-game' | 'end-game' | 'final') => {
     let soundType = settings?.startGameSound || 'beep-high';
@@ -132,15 +136,22 @@ export default function Nonstop() {
         // Warmup -> Game 1
         setRound(1);
         setTimerState('game');
-        setTimeLeft((settings?.gameTime || 20) * 60);
+        setTimeLeft(gameMinutes * 60);
         playSound('start-game');
         toast({ title: "Aquecimento Concluído", description: "Início do jogo!" });
       } else if (timerState === 'game') {
-        if (round < (settings?.nonstopRounds || 5)) {
+        if (round < totalRounds) {
           // Game X -> Rest
-          setTimerState('rest');
-          setTimeLeft((settings?.restTime || 2) * 60);
           playSound('end-game');
+          if (restMinutes > 0) {
+            setTimerState('rest');
+            setTimeLeft(restMinutes * 60);
+          } else {
+            setRound((prev) => prev + 1);
+            setTimerState('game');
+            setTimeLeft(gameMinutes * 60);
+            playSound('start-game');
+          }
         } else {
           // Final Game -> End
           setIsActive(false);
@@ -152,18 +163,18 @@ export default function Nonstop() {
         // Rest -> Game X+1
         setRound((prev) => prev + 1);
         setTimerState('game');
-        setTimeLeft((settings?.gameTime || 20) * 60);
+        setTimeLeft(gameMinutes * 60);
         playSound('start-game');
       }
     }
     return () => clearInterval(interval);
-  }, [isActive, timeLeft, timerState, settings, round]);
+  }, [isActive, timeLeft, timerState, round, gameMinutes, restMinutes, totalRounds]);
 
   const startTimer = (state: TimerState) => {
     setTimerState(state);
-    const minutes = state === 'warmup' ? (settings?.warmupTime || 5) : 
-                    state === 'game' ? (settings?.gameTime || 20) : 
-                    (settings?.restTime || 2);
+    const minutes = state === 'warmup' ? warmupMinutes : 
+                    state === 'game' ? gameMinutes : 
+                    restMinutes;
     setTimeLeft(minutes * 60);
     setIsActive(true);
     
@@ -717,13 +728,30 @@ export default function Nonstop() {
                   onClick={() => {
                     setTimerState('game');
                     setRound(1);
-                    setTimeLeft((settings?.gameTime || 20) * 60);
+                    setTimeLeft(gameMinutes * 60);
                     playSound('start-game');
                     setIsActive(true);
                     toast({ title: "Aquecimento Ignorado", description: "Início do jogo imediato!" });
                   }}
                 >
                   PULAR AQ
+                </Button>
+              )}
+              {timerState === 'rest' && round < totalRounds && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10"
+                  onClick={() => {
+                    setRound((prev) => prev + 1);
+                    setTimerState('game');
+                    setTimeLeft(gameMinutes * 60);
+                    playSound('start-game');
+                    setIsActive(true);
+                    toast({ title: "Descanso Ignorado", description: "InÃ­cio da prÃ³xima ronda!" });
+                  }}
+                >
+                  PULAR DESC
                 </Button>
               )}
 
@@ -735,7 +763,7 @@ export default function Nonstop() {
                       setIsActive(true);
                     } else {
                       // Se houver tempo de aquecimento configurado, começa pelo aquecimento
-                      if ((settings?.warmupTime || 0) > 0) {
+                      if (warmupMinutes > 0) {
                         startTimer('warmup');
                       } else {
                         startTimer('game');
@@ -1080,5 +1108,4 @@ function TeamForm({
     </Form>
   );
 }
-
 

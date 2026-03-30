@@ -586,17 +586,17 @@ export default function Settings() {
                           <FormControl>
                             <Input 
                               type="number" 
-                              min="1" 
+                              min="0" 
                               {...field} 
                               value={field.value ?? ''}
                               onChange={(e) => field.onChange(e.target.value === '' ? '' : parseInt(e.target.value))}
                               onBlur={(e) => {
-                                const num = parseInt(e.target.value) || 1;
-                                field.onChange(num < 1 ? 1 : num);
+                                const num = parseInt(e.target.value) || 0;
+                                field.onChange(num < 0 ? 0 : num);
                               }}
                             />
                           </FormControl>
-                          <FormDescription className="text-xs">mínimo 1 minuto</FormDescription>
+                          <FormDescription className="text-xs">0 = sem descanso</FormDescription>
                         </FormItem>
                       )} />
                     </div>

@@ -264,6 +264,33 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/teams/:id", isAuthenticated, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const input = insertTeamSchema.parse(req.body);
+      const team = await storage.updateTeam(id, input);
+      res.json(team);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join('.'),
+        });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/teams/:id", isAuthenticated, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      await storage.deleteTeam(id);
+      res.status(204).end();
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/results", isAuthenticated, async (_req, res) => {
     const results = await storage.getResults();
     res.json(results);

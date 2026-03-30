@@ -1,6 +1,6 @@
 import { players, teams, nonstopResults, settings, authorizedUsers, type Player, type InsertPlayer, type UpdatePlayerRequest, type Team, type InsertTeam, type NonstopResult, type InsertNonstopResult, type Settings, type InsertSettings, type AuthorizedUser, type InsertAuthorizedUser } from "../shared/schema.js";
 import { db } from "./db.js";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 
 export interface IStorage {
   // Players
@@ -12,6 +12,8 @@ export interface IStorage {
   // Teams
   getTeams(): Promise<Team[]>;
   createTeam(team: InsertTeam): Promise<Team>;
+  updateTeam(id: number, team: InsertTeam): Promise<Team>;
+  deleteTeam(id: number): Promise<void>;
 
   // Results
   getResults(): Promise<NonstopResult[]>;
@@ -61,6 +63,21 @@ export class DatabaseStorage implements IStorage {
   async createTeam(insertTeam: InsertTeam): Promise<Team> {
     const [team] = await db.insert(teams).values(insertTeam).returning();
     return team;
+  }
+
+  async updateTeam(id: number, update: InsertTeam): Promise<Team> {
+    const [team] = await db.update(teams).set(update).where(eq(teams.id, id)).returning();
+    return team;
+  }
+
+  async deleteTeam(id: number): Promise<void> {
+    await db.delete(nonstopResults).where(
+      or(
+        eq(nonstopResults.teamAId, id),
+        eq(nonstopResults.teamBId, id),
+      ),
+    );
+    await db.delete(teams).where(eq(teams.id, id));
   }
 
   async getResults(): Promise<NonstopResult[]> {

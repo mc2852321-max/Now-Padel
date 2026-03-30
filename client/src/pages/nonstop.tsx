@@ -10,7 +10,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download } from "lucide-react";
+import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2 } from "lucide-react";
 import * as XLSX from "xlsx-js-style";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -37,6 +37,7 @@ export default function Nonstop() {
   const [isActive, setIsActive] = useState(false);
   const [round, setRound] = useState(1);
   const [isTeamDialogOpen, setIsTeamDialogOpen] = useState(false);
+  const [editingTeam, setEditingTeam] = useState<Team | null>(null);
 
   const numCourts = settings?.nonstopCourts || 3;
   const numTeams = numCourts * 2;
@@ -205,6 +206,30 @@ export default function Nonstop() {
         toast({ title: "Sorteio Realizado", description: "As equipas foram distribuídas pelas rondas." });
       }
     }
+  });
+
+  const updateTeamMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: any }) => {
+      const res = await apiRequest("PATCH", `/api/teams/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/results"] });
+      setEditingTeam(null);
+      toast({ title: "Sucesso", description: "Dupla atualizada" });
+    },
+  });
+
+  const deleteTeamMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/teams/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/results"] });
+      toast({ title: "Sucesso", description: "Dupla apagada" });
+    },
   });
 
   const updateResultMutation = useMutation({
@@ -703,6 +728,77 @@ export default function Nonstop() {
 
       <Card className="overflow-hidden border-2 border-slate-800">
         <CardHeader className="bg-slate-900 text-white p-4">
+          <CardTitle className="text-sm uppercase tracking-widest text-center">Gestao de Duplas</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader className="bg-slate-100">
+              <TableRow>
+                <TableHead>Dupla</TableHead>
+                <TableHead className="text-right w-40">Acoes</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(teams || []).map((team) => (
+                <TableRow key={team.id}>
+                  <TableCell className="font-medium">{team.name}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setEditingTeam(team)}
+                        title="Editar dupla"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive hover:text-destructive"
+                            title="Apagar dupla"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Apagar dupla?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              A dupla "{team.name}" e todos os jogos associados serao apagados.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => deleteTeamMutation.mutate(team.id)}
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              Confirmar
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!teams?.length && (
+                <TableRow>
+                  <TableCell colSpan={2} className="h-16 text-center text-muted-foreground">
+                    Ainda nao existem duplas.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card className="overflow-hidden border-2 border-slate-800">
+        <CardHeader className="bg-slate-900 text-white p-4">
           <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -824,15 +920,38 @@ export default function Nonstop() {
           );
         })}
       </div>
+
+      <Dialog open={!!editingTeam} onOpenChange={() => setEditingTeam(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Dupla</DialogTitle>
+          </DialogHeader>
+          {editingTeam && (
+            <TeamForm
+              defaultValues={editingTeam}
+              submitLabel="Guardar Alteracoes"
+              onSubmit={(data) => updateTeamMutation.mutate({ id: editingTeam.id, data })}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function TeamForm({ onSubmit }: { onSubmit: (data: any) => void }) {
+function TeamForm({
+  onSubmit,
+  defaultValues,
+  submitLabel = "Adicionar",
+}: {
+  onSubmit: (data: any) => void;
+  defaultValues?: Partial<Team>;
+  submitLabel?: string;
+}) {
   const form = useForm({
     resolver: zodResolver(insertTeamSchema),
     defaultValues: {
-      name: "",
+      name: defaultValues?.name || "",
     },
   });
 
@@ -850,7 +969,7 @@ function TeamForm({ onSubmit }: { onSubmit: (data: any) => void }) {
             </FormItem>
           )}
         />
-        <Button type="submit" className="w-full">Adicionar</Button>
+        <Button type="submit" className="w-full">{submitLabel}</Button>
       </form>
     </Form>
   );

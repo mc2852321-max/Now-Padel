@@ -255,8 +255,7 @@ export default function Players() {
           <Dialog open={isBulkMessageOpen} onOpenChange={setIsBulkMessageOpen}>
             <DialogTrigger asChild>
               <Button 
-                variant="outline" 
-                className="gap-2 text-orange-600 border-orange-600 hover:bg-orange-50"
+                className="gap-2 bg-orange-600 text-white hover:bg-orange-500"
                 disabled={selectedIds.length === 0}
                 onClick={() => {
                   setLastSelectedIds([...selectedIds]);

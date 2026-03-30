@@ -784,7 +784,7 @@ export default function Nonstop() {
 
           <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" className="gap-2" disabled={(teams?.length || 0) >= numTeams}>
+              <Button className="gap-2 bg-orange-600 text-white hover:bg-orange-500" disabled={(teams?.length || 0) >= numTeams}>
                 <Plus className="w-4 h-4" /> Adicionar dupla
               </Button>
             </DialogTrigger>
@@ -796,7 +796,7 @@ export default function Nonstop() {
 
           <Dialog open={isManageTeamsOpen} onOpenChange={setIsManageTeamsOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" className="gap-2">
+              <Button className="gap-2 bg-orange-600 text-white hover:bg-orange-500">
                 <Edit2 className="w-4 h-4" /> Gerir duplas
               </Button>
             </DialogTrigger>

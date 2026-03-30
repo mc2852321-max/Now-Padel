@@ -34,6 +34,3 @@ app.use(express.urlencoded({ limit: "100mb", extended: false }));
 export default function handler(req: any, res: any) {
   app(req, res);
 }
-    }
-  }
-}

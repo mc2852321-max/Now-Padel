@@ -173,10 +173,10 @@ input::-webkit-password-toggle {
 }
 
 .padel-bg::before {
-  content: none;
+  content: "";
   position: absolute;
   inset: 0;
-  background: transparent;
+  background: hsl(35 25% 96% / 0.52);
   pointer-events: none;
   z-index: 0;
 }

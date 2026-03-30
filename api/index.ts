@@ -1,5 +1,6 @@
 import { createServer } from "http";
 import express from "express";
+import { registerRoutes } from "../server/routes";
 
 const app = express();
 const httpServer = createServer(app);
@@ -27,7 +28,6 @@ async function ensureInitialized() {
   if (!initPromise) {
     initPromise = (async () => {
       try {
-        const { registerRoutes } = await import("../server/routes");
         await registerRoutes(httpServer, app);
         app.use((err: any, _req: any, res: any, _next: any) => {
           const status = err.status || err.statusCode || 500;

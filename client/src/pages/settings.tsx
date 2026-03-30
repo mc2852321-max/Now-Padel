@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormDescription, FormMessage } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
@@ -300,7 +301,7 @@ function ChangePasswordSection() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <FormLabel htmlFor="settings-current-password">Palavra-passe atual</FormLabel>
+          <Label htmlFor="settings-current-password">Palavra-passe atual</Label>
           <div className="relative">
             <Input
               id="settings-current-password"
@@ -325,7 +326,7 @@ function ChangePasswordSection() {
         </div>
 
         <div className="space-y-2">
-          <FormLabel htmlFor="settings-new-password">Nova palavra-passe</FormLabel>
+          <Label htmlFor="settings-new-password">Nova palavra-passe</Label>
           <div className="relative">
             <Input
               id="settings-new-password"
@@ -350,7 +351,7 @@ function ChangePasswordSection() {
         </div>
 
         <div className="space-y-2">
-          <FormLabel htmlFor="settings-confirm-password">Confirmar nova palavra-passe</FormLabel>
+          <Label htmlFor="settings-confirm-password">Confirmar nova palavra-passe</Label>
           <div className="relative">
             <Input
               id="settings-confirm-password"

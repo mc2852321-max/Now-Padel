@@ -412,14 +412,13 @@ function App() {
             <main 
               className="flex-1 overflow-auto p-3 sm:p-4 md:p-8 padel-bg"
               style={{
-                backgroundImage: `url(${padelBgImage})`,
+                backgroundImage: `linear-gradient(rgba(247, 244, 240, 0.36), rgba(247, 244, 240, 0.36)), url(${padelBgImage})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 backgroundRepeat: 'no-repeat',
                 backgroundAttachment: 'scroll'
               }}
             >
-              <div className="padel-overlay" />
               <Router />
             </main>
           </div>

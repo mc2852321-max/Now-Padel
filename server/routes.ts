@@ -380,22 +380,20 @@ export async function registerRoutes(
 
     const sortedStandings = Object.values(standings).sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
-      
-      const tieBreaker = settings?.tieBreaker || 'direct';
-      
-      if (tieBreaker === 'direct') {
-        const directMatch = results.find(r => 
-          (r.teamAId === a.teamId && r.teamBId === b.teamId) || 
-          (r.teamAId === b.teamId && r.teamBId === a.teamId)
-        );
-        
-        if (directMatch && directMatch.scoreA !== null && directMatch.scoreB !== null) {
-          const aScore = directMatch.teamAId === a.teamId ? directMatch.scoreA : directMatch.scoreB;
-          const bScore = directMatch.teamAId === b.teamId ? directMatch.scoreA : directMatch.scoreB;
-          if (aScore !== bScore) return bScore - aScore;
-        }
+
+      // 1º critério de desempate: confronto direto
+      const directMatch = results.find(r =>
+        (r.teamAId === a.teamId && r.teamBId === b.teamId) ||
+        (r.teamAId === b.teamId && r.teamBId === a.teamId)
+      );
+
+      if (directMatch && directMatch.scoreA !== null && directMatch.scoreB !== null) {
+        const aScore = directMatch.teamAId === a.teamId ? directMatch.scoreA : directMatch.scoreB;
+        const bScore = directMatch.teamAId === b.teamId ? directMatch.scoreA : directMatch.scoreB;
+        if (aScore !== bScore) return bScore - aScore;
       }
-      
+
+      // 2º critério de desempate: diferença jogos ganhos vs perdidos
       const diffA = a.gamesWon - a.gamesLost;
       const diffB = b.gamesWon - b.gamesLost;
       return diffB - diffA;

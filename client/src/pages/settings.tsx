@@ -866,33 +866,17 @@ export default function Settings() {
               <Card>
                 <CardHeader>
                   <CardTitle>Regras do Torneio</CardTitle>
-                  <CardDescription>Configure os critérios de pontuação e desempate.</CardDescription>
+                  <CardDescription>Critérios de pontuação e desempate aplicados automaticamente.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <FormField
-                    control={form.control}
-                    name="tieBreaker"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Critério de Desempate</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Escolha o critério" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="direct">Confronto Direto</SelectItem>
-                            <SelectItem value="diff">Diferença de Jogos (Ganhos - Perdidos)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormDescription>
-                          Define qual critério será usado primeiro em caso de igualdade de pontos.
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  <div className="space-y-2 text-sm text-muted-foreground">
+                    <p>
+                      1. Primeiro critério: <span className="font-medium text-foreground">Confronto direto</span>.
+                    </p>
+                    <p>
+                      2. Segundo critério: <span className="font-medium text-foreground">Diferença entre jogos ganhos e perdidos</span>.
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>

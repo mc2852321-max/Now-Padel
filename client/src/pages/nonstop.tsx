@@ -699,22 +699,20 @@ export default function Nonstop() {
 
     return Object.values(standings).sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
-      
-      const tieBreaker = settings?.tieBreaker || 'direct';
-      
-      if (tieBreaker === 'direct') {
-        const directMatch = results?.find(r => 
-          (r.teamAId === a.teamId && r.teamBId === b.teamId) || 
-          (r.teamAId === b.teamId && r.teamBId === a.teamId)
-        );
-        
-        if (directMatch && directMatch.scoreA !== null && directMatch.scoreB !== null) {
-          const aScore = directMatch.teamAId === a.teamId ? directMatch.scoreA : directMatch.scoreB;
-          const bScore = directMatch.teamAId === b.teamId ? directMatch.scoreA : directMatch.scoreB;
-          if (aScore !== bScore) return bScore - aScore;
-        }
+
+      // 1º critério de desempate: confronto direto
+      const directMatch = results?.find(r =>
+        (r.teamAId === a.teamId && r.teamBId === b.teamId) ||
+        (r.teamAId === b.teamId && r.teamBId === a.teamId)
+      );
+
+      if (directMatch && directMatch.scoreA !== null && directMatch.scoreB !== null) {
+        const aScore = directMatch.teamAId === a.teamId ? directMatch.scoreA : directMatch.scoreB;
+        const bScore = directMatch.teamAId === b.teamId ? directMatch.scoreA : directMatch.scoreB;
+        if (aScore !== bScore) return bScore - aScore;
       }
-      
+
+      // 2º critério de desempate: diferença jogos ganhos vs perdidos
       const diffA = a.gamesWon - a.gamesLost;
       const diffB = b.gamesWon - b.gamesLost;
       return diffB - diffA;
@@ -771,7 +769,7 @@ export default function Nonstop() {
                     setTimeLeft(gameMinutes * 60);
                     playSound('start-game');
                     setIsActive(true);
-                    toast({ title: "Descanso Ignorado", description: "InÃ­cio da prÃ³xima ronda!" });
+                    toast({ title: "Descanso Ignorado", description: "Início da próxima ronda!" });
                   }}
                 >
                   PULAR DESC
@@ -937,33 +935,33 @@ export default function Nonstop() {
         </div>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-4">
         <div className="sticky top-0 z-50 pt-1">
           <Card className="overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-xl">
-            <CardHeader className="bg-slate-900 text-white p-3">
+            <CardHeader className="bg-slate-900 text-white py-2 px-3">
               <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
             </CardHeader>
-            <CardContent className="p-0 max-h-[42vh] overflow-auto bg-slate-100">
+            <CardContent className="p-0 max-h-[46vh] overflow-auto bg-slate-100">
               <Table>
                 <TableHeader className="bg-orange-600 text-white">
-                  <TableRow className="hover:bg-orange-600">
-                    <TableHead className="text-white font-bold uppercase py-2 px-4 min-w-[220px]">Duplas</TableHead>
+                  <TableRow className="hover:bg-orange-600 h-8">
+                    <TableHead className="text-white font-bold uppercase text-[11px] py-1.5 px-3 min-w-[220px]">Duplas</TableHead>
                     {Array.from({ length: numRounds }).map((_, i) => (
-                      <TableHead key={i} className="text-white font-bold text-center border-l border-orange-500">Ronda {i + 1}</TableHead>
+                      <TableHead key={i} className="text-white font-bold text-center text-[11px] py-1.5 border-l border-orange-500">Ronda {i + 1}</TableHead>
                     ))}
-                    <TableHead className="text-white font-bold text-center border-l border-orange-500">JG</TableHead>
-                    <TableHead className="text-white font-bold text-center border-l border-orange-500">JP</TableHead>
-                    <TableHead className="text-white font-bold text-center border-l border-orange-500">DIF.</TableHead>
-                    <TableHead className="text-white font-bold text-center border-l border-orange-500 w-20">Pontos</TableHead>
+                    <TableHead className="text-white font-bold text-center text-[11px] py-1.5 border-l border-orange-500">JG</TableHead>
+                    <TableHead className="text-white font-bold text-center text-[11px] py-1.5 border-l border-orange-500">JP</TableHead>
+                    <TableHead className="text-white font-bold text-center text-[11px] py-1.5 border-l border-orange-500">DIF.</TableHead>
+                    <TableHead className="text-white font-bold text-center text-[11px] py-1.5 border-l border-orange-500 w-20">Pontos</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {stats.map((s: any) => (
-                    <TableRow key={s.teamId} className="hover:bg-slate-50">
-                      <TableCell className="font-medium py-2 px-3 text-sm">{s.name}</TableCell>
+                    <TableRow key={s.teamId} className="hover:bg-slate-50 h-8">
+                      <TableCell className="font-medium py-1.5 px-3 text-xs leading-tight">{s.name}</TableCell>
                       {s.sequence.map((char: string, i: number) => (
                         <TableCell key={i} className={cn(
-                          "text-center font-bold border-l w-20",
+                          "text-center text-xs font-bold border-l w-20 py-1.5",
                           char === 'V' ? "bg-green-100 text-green-700" :
                           char === 'D' ? "bg-red-100 text-red-700" : 
                           char === 'E' ? "bg-yellow-100 text-yellow-700" : ""
@@ -971,10 +969,10 @@ export default function Nonstop() {
                           {char}
                         </TableCell>
                       ))}
-                      <TableCell className="text-center border-l w-14">{s.gamesWon}</TableCell>
-                      <TableCell className="text-center border-l w-14">{s.gamesLost}</TableCell>
-                      <TableCell className="text-center border-l w-14">{s.gamesWon - s.gamesLost}</TableCell>
-                      <TableCell className="text-center font-bold border-l bg-slate-50 w-20">{s.points}</TableCell>
+                      <TableCell className="text-center text-xs border-l w-14 py-1.5">{s.gamesWon}</TableCell>
+                      <TableCell className="text-center text-xs border-l w-14 py-1.5">{s.gamesLost}</TableCell>
+                      <TableCell className="text-center text-xs border-l w-14 py-1.5">{s.gamesWon - s.gamesLost}</TableCell>
+                      <TableCell className="text-center text-xs font-bold border-l bg-slate-50 w-20 py-1.5">{s.points}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -982,7 +980,7 @@ export default function Nonstop() {
             </CardContent>
           </Card>
         </div>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         {Array.from({ length: numRounds }).map((_, rIdx) => {
           const roundNum = rIdx + 1;
           return (
@@ -990,16 +988,16 @@ export default function Nonstop() {
               <CardHeader className="bg-orange-600 text-white py-2 text-center">
                 <CardTitle className="text-xs uppercase tracking-widest">Ronda {roundNum}</CardTitle>
               </CardHeader>
-              <CardContent className="p-0 px-1">
+              <CardContent className="p-0">
                 <Table>
                   <TableHeader className="bg-slate-100">
-                    <TableRow className="hover:bg-slate-100">
-                      <TableHead className="w-14 text-center font-bold text-xs px-2">CAMPO</TableHead>
-                      <TableHead className="font-bold text-xs w-[34%] px-2">EQUIPA A</TableHead>
-                      <TableHead className="w-20 text-center font-bold text-xs px-2">RESULTADO</TableHead>
-                      <TableHead className="w-10 text-center text-muted-foreground font-normal">vs</TableHead>
-                      <TableHead className="w-20 text-center font-bold text-xs px-2">RESULTADO</TableHead>
-                      <TableHead className="font-bold text-xs w-[34%] px-2">EQUIPA B</TableHead>
+                    <TableRow className="hover:bg-slate-100 h-8">
+                      <TableHead className="w-12 text-center font-bold text-[11px] px-2 py-1.5">CAMPO</TableHead>
+                      <TableHead className="font-bold text-[11px] w-[34%] px-2 py-1.5">EQUIPA A</TableHead>
+                      <TableHead className="w-16 text-center font-bold text-[11px] px-2 py-1.5">RESULTADO</TableHead>
+                      <TableHead className="w-8 text-center text-[11px] text-muted-foreground font-normal py-1.5">vs</TableHead>
+                      <TableHead className="w-16 text-center font-bold text-[11px] px-2 py-1.5">RESULTADO</TableHead>
+                      <TableHead className="font-bold text-[11px] w-[34%] px-2 py-1.5">EQUIPA B</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1007,14 +1005,14 @@ export default function Nonstop() {
                       const courtNum = cIdx + 1;
                       const matchResult = results?.find(res => res.round === roundNum && res.court === courtNum);
                       return (
-                        <TableRow key={courtNum}>
-                          <TableCell className="text-center font-bold bg-slate-50 border-r px-2">{courtNum}</TableCell>
-                          <TableCell className="w-[34%] px-1">
+                        <TableRow key={courtNum} className="h-9">
+                          <TableCell className="text-center text-xs font-bold bg-slate-50 border-r px-2 py-1.5">{courtNum}</TableCell>
+                          <TableCell className="w-[34%] px-1 py-1">
                             <Select 
                               value={matchResult?.teamAId?.toString()} 
                               onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamAId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamBId: matchResult?.teamBId ?? 0 })}
                             >
-                              <SelectTrigger className="border-none shadow-none focus:ring-0 h-9 text-xs px-2 min-w-[150px]">
+                              <SelectTrigger className="border-none shadow-none focus:ring-0 h-7 text-[11px] px-2 min-w-[130px]">
                                 <SelectValue placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1022,11 +1020,11 @@ export default function Nonstop() {
                               </SelectContent>
                             </Select>
                           </TableCell>
-                          <TableCell className="p-0 px-1">
+                          <TableCell className="p-0 px-1 py-1">
                             <Input 
                               type="text"
                               inputMode="numeric"
-                              className="border-none text-center font-bold focus-visible:ring-0 h-7 w-12 mx-auto px-0"
+                              className="border-none text-center text-xs font-bold focus-visible:ring-0 h-6 w-10 mx-auto px-0"
                               value={getScoreValue(roundNum, courtNum, "A", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "A", e.target.value)}
                               onBlur={() => commitScore(roundNum, courtNum, "A", matchResult)}
@@ -1037,12 +1035,12 @@ export default function Nonstop() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="text-center text-muted-foreground bg-slate-50 border-x">vs</TableCell>
-                          <TableCell className="p-0 px-1">
+                          <TableCell className="text-center text-[11px] text-muted-foreground bg-slate-50 border-x py-1.5">vs</TableCell>
+                          <TableCell className="p-0 px-1 py-1">
                             <Input 
                               type="text"
                               inputMode="numeric"
-                              className="border-none text-center font-bold focus-visible:ring-0 h-7 w-12 mx-auto px-0"
+                              className="border-none text-center text-xs font-bold focus-visible:ring-0 h-6 w-10 mx-auto px-0"
                               value={getScoreValue(roundNum, courtNum, "B", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "B", e.target.value)}
                               onBlur={() => commitScore(roundNum, courtNum, "B", matchResult)}
@@ -1053,12 +1051,12 @@ export default function Nonstop() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="w-[34%] px-1">
+                          <TableCell className="w-[34%] px-1 py-1">
                             <Select 
                               value={matchResult?.teamBId?.toString()} 
                               onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamBId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamAId: matchResult?.teamAId ?? 0 })}
                             >
-                              <SelectTrigger className="border-none shadow-none focus:ring-0 h-9 text-xs px-2 min-w-[150px]">
+                              <SelectTrigger className="border-none shadow-none focus:ring-0 h-7 text-[11px] px-2 min-w-[130px]">
                                 <SelectValue placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>

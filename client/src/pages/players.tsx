@@ -375,7 +375,7 @@ export default function Players() {
           </Dialog>
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
             <DialogTrigger asChild>
-              <Button className="gap-2">
+              <Button className="gap-2 bg-orange-600 text-white hover:bg-orange-500">
                 <Plus className="w-4 h-4" />
                 <span>Adicionar</span>
               </Button>

@@ -622,7 +622,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
-                              <SelectItem value="air-horn">Buzina de Ar (5s)</SelectItem>
+                              <SelectItem value="air-horn">Air Horn / Buzina de Ar (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -661,7 +661,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
-                              <SelectItem value="air-horn">Buzina de Ar (5s)</SelectItem>
+                              <SelectItem value="air-horn">Air Horn / Buzina de Ar (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -700,7 +700,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
-                              <SelectItem value="air-horn">Buzina de Ar (5s)</SelectItem>
+                              <SelectItem value="air-horn">Air Horn / Buzina de Ar (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -739,7 +739,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
-                              <SelectItem value="air-horn">Buzina de Ar (5s)</SelectItem>
+                              <SelectItem value="air-horn">Air Horn / Buzina de Ar (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />

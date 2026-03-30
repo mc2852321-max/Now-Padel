@@ -101,16 +101,16 @@ export async function registerRoutes(
       const user = await storage.getAuthorizedUserByEmail(email);
       
       if (!user) {
-        return res.status(401).json({ message: "Email não autorizado" });
+        return res.status(401).json({ message: "Email ou palavra-passe incorretos" });
       }
       
       if (!user.password) {
-        return res.status(401).json({ message: "Password não definida. Contacte o administrador." });
+        return res.status(401).json({ message: "Email ou palavra-passe incorretos" });
       }
       
       const isValid = await bcrypt.compare(password, user.password);
       if (!isValid) {
-        return res.status(401).json({ message: "Password incorreta" });
+        return res.status(401).json({ message: "Email ou palavra-passe incorretos" });
       }
       
       (req.session as any).userId = user.id;
@@ -593,5 +593,4 @@ export async function registerRoutes(
 
   return httpServer;
 }
-
 

@@ -446,6 +446,21 @@ export async function registerRoutes(
 
   // Seed data with new levels
   try {
+    const bootstrapEmail = "marcelo_cristovao@live.com.pt";
+    const bootstrapPassword = "Teste1";
+
+    let bootstrapUser = await storage.getAuthorizedUserByEmail(bootstrapEmail);
+    if (!bootstrapUser) {
+      bootstrapUser = await storage.createAuthorizedUser({
+        email: bootstrapEmail,
+        name: "Marcelo Cristovao",
+      });
+    }
+
+    if (!bootstrapUser.password) {
+      const hashedPassword = await bcrypt.hash(bootstrapPassword, 10);
+      await storage.setUserPassword(bootstrapUser.id, hashedPassword);
+    }
     const existing = await storage.getPlayers();
     if (existing.length === 0) {
       await storage.createPlayer({ name: "João Silva", phone: "912345678", level: "M5", notes: "Excelente backhand" });
@@ -459,4 +474,5 @@ export async function registerRoutes(
 
   return httpServer;
 }
+
 

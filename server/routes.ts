@@ -4,10 +4,12 @@ import { storage } from "./storage.js";
 import { api } from "../shared/routes.js";
 import { insertTeamSchema, insertAuthorizedUserSchema, loginSchema, changePasswordSchema } from "../shared/schema.js";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import pg from "pg";
+import { db } from "./db.js";
 
 const databaseUrl =
   process.env.DATABASE_URL ||
@@ -446,6 +448,16 @@ export async function registerRoutes(
 
   // Seed data with new levels
   try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS authorized_users (
+        id SERIAL PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        name TEXT,
+        password TEXT,
+        added_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
     const bootstrapEmail = "marcelo_cristovao@live.com.pt";
     const bootstrapPassword = "Teste1";
 

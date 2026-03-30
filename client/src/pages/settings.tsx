@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormDescription, FormMessage } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
-import { Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Check, Eye, EyeOff } from "lucide-react";
+import { Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Eye, EyeOff } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Settings as SettingsType, AuthorizedUser } from "@shared/schema";
@@ -238,6 +238,158 @@ function AuthorizedUsersSection() {
           </Table>
           </>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ChangePasswordSection() {
+  const { toast } = useToast();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async (data: { currentPassword: string; newPassword: string }) => {
+      const res = await apiRequest("POST", "/api/auth/change-password", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Sucesso", description: "Palavra-passe alterada com sucesso." });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Erro",
+        description: err.message || "Não foi possível alterar a palavra-passe.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleChangePassword = () => {
+    if (newPassword !== confirmPassword) {
+      toast({ title: "Erro", description: "As palavras-passe não coincidem.", variant: "destructive" });
+      return;
+    }
+    if (newPassword.length < 4) {
+      toast({ title: "Erro", description: "A nova palavra-passe deve ter pelo menos 4 caracteres.", variant: "destructive" });
+      return;
+    }
+    changePasswordMutation.mutate({ currentPassword, newPassword });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <Key className="w-6 h-6 text-orange-600" />
+          <div>
+            <CardTitle>Alterar Palavra-passe</CardTitle>
+            <CardDescription>Atualize a palavra-passe de acesso à plataforma.</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <FormLabel htmlFor="settings-current-password">Palavra-passe atual</FormLabel>
+          <div className="relative">
+            <Input
+              id="settings-current-password"
+              type={showCurrentPassword ? "text" : "password"}
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              placeholder="Introduza a palavra-passe atual"
+              className="pr-10"
+            />
+            <button
+              type="button"
+              className="absolute right-2 inset-y-0 flex items-center"
+              onClick={() => setShowCurrentPassword((v) => !v)}
+            >
+              {showCurrentPassword ? (
+                <EyeOff className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <Eye className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <FormLabel htmlFor="settings-new-password">Nova palavra-passe</FormLabel>
+          <div className="relative">
+            <Input
+              id="settings-new-password"
+              type={showNewPassword ? "text" : "password"}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Introduza a nova palavra-passe"
+              className="pr-10"
+            />
+            <button
+              type="button"
+              className="absolute right-2 inset-y-0 flex items-center"
+              onClick={() => setShowNewPassword((v) => !v)}
+            >
+              {showNewPassword ? (
+                <EyeOff className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <Eye className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <FormLabel htmlFor="settings-confirm-password">Confirmar nova palavra-passe</FormLabel>
+          <div className="relative">
+            <Input
+              id="settings-confirm-password"
+              type={showConfirmPassword ? "text" : "password"}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Repita a nova palavra-passe"
+              className="pr-10"
+            />
+            <button
+              type="button"
+              className="absolute right-2 inset-y-0 flex items-center"
+              onClick={() => setShowConfirmPassword((v) => !v)}
+            >
+              {showConfirmPassword ? (
+                <EyeOff className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <Eye className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <Button
+          type="button"
+          className="w-full sm:w-auto bg-orange-600 text-white hover:bg-orange-500"
+          onClick={handleChangePassword}
+          disabled={
+            !currentPassword ||
+            !newPassword ||
+            !confirmPassword ||
+            newPassword !== confirmPassword ||
+            changePasswordMutation.isPending
+          }
+          data-testid="button-change-password-settings"
+        >
+          {changePasswordMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          Guardar nova palavra-passe
+        </Button>
       </CardContent>
     </Card>
   );
@@ -783,6 +935,7 @@ export default function Settings() {
         )}
 
         <TabsContent value="access" className="space-y-6 mt-6">
+          <ChangePasswordSection />
           <AuthorizedUsersSection />
         </TabsContent>
       </Tabs>

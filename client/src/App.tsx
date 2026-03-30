@@ -15,7 +15,7 @@ import type { Settings as SettingsType } from "@shared/schema";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { LogIn, LogOut, Loader2, AlertCircle, Eye, EyeOff, Key, User, ChevronDown } from "lucide-react";
+import { LogIn, LogOut, Loader2, AlertCircle, Eye, EyeOff, User, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,15 +24,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
@@ -167,55 +158,10 @@ function LoadingScreen() {
 
 function App() {
   const { user, isLoading, isAuthenticated, logout } = useAuth();
-  const { toast } = useToast();
   const { data: settings } = useQuery<SettingsType>({
     queryKey: ["/api/settings"],
     enabled: isAuthenticated
   });
-
-  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  const changePasswordMutation = useMutation({
-    mutationFn: async (data: { currentPassword: string; newPassword: string }) => {
-      const res = await apiRequest("POST", "/api/auth/change-password", data);
-      return res.json();
-    },
-    onSuccess: () => {
-      toast({ title: "Sucesso", description: "Password alterada com sucesso!" });
-      setPasswordDialogOpen(false);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setShowCurrentPassword(false);
-      setShowNewPassword(false);
-      setShowConfirmPassword(false);
-    },
-    onError: (err: any) => {
-      toast({ 
-        title: "Erro", 
-        description: err.message || "Não foi possível alterar a password",
-        variant: "destructive" 
-      });
-    }
-  });
-
-  const handleChangePassword = () => {
-    if (newPassword !== confirmPassword) {
-      toast({ title: "Erro", description: "As passwords não coincidem", variant: "destructive" });
-      return;
-    }
-    if (newPassword.length < 4) {
-      toast({ title: "Erro", description: "A password deve ter pelo menos 4 caracteres", variant: "destructive" });
-      return;
-    }
-    changePasswordMutation.mutate({ currentPassword, newPassword });
-  };
 
   if (isLoading) {
     return <LoadingScreen />;
@@ -293,14 +239,6 @@ function App() {
                       <DropdownMenuLabel>Minha Conta</DropdownMenuLabel>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem 
-                        onClick={() => setPasswordDialogOpen(true)}
-                        data-testid="menu-change-password"
-                      >
-                        <Key className="w-4 h-4 mr-2" />
-                        Alterar Password
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem 
                         onClick={() => logout()}
                         data-testid="menu-logout"
                         className="text-red-600 focus:text-red-600"
@@ -313,102 +251,6 @@ function App() {
                 )}
               </div>
             </header>
-            
-            <Dialog open={passwordDialogOpen} onOpenChange={setPasswordDialogOpen}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Alterar Password</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 pt-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="current-password">Password Atual</Label>
-                    <div className="relative">
-                      <Input
-                        id="current-password"
-                        type={showCurrentPassword ? "text" : "password"}
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                        placeholder="Introduza a password atual"
-                        data-testid="input-current-password"
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-2 inset-y-0 flex items-center"
-                        onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                      >
-                        {showCurrentPassword ? (
-                          <EyeOff className="h-4 w-4 text-muted-foreground" />
-                        ) : (
-                          <Eye className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="new-password">Nova Password</Label>
-                    <div className="relative">
-                      <Input
-                        id="new-password"
-                        type={showNewPassword ? "text" : "password"}
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Introduza a nova password"
-                        data-testid="input-new-password"
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-2 inset-y-0 flex items-center"
-                        onClick={() => setShowNewPassword(!showNewPassword)}
-                      >
-                        {showNewPassword ? (
-                          <EyeOff className="h-4 w-4 text-muted-foreground" />
-                        ) : (
-                          <Eye className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="confirm-password">Confirmar Password</Label>
-                    <div className="relative">
-                      <Input
-                        id="confirm-password"
-                        type={showConfirmPassword ? "text" : "password"}
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="Repita a nova password"
-                        data-testid="input-confirm-new-password"
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-2 inset-y-0 flex items-center"
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      >
-                        {showConfirmPassword ? (
-                          <EyeOff className="h-4 w-4 text-muted-foreground" />
-                        ) : (
-                          <Eye className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </button>
-                    </div>
-                    {newPassword && confirmPassword && newPassword !== confirmPassword && (
-                      <p className="text-sm text-red-500">As passwords não coincidem</p>
-                    )}
-                  </div>
-                  <Button 
-                    className="w-full" 
-                    onClick={handleChangePassword}
-                    disabled={!currentPassword || !newPassword || !confirmPassword || newPassword !== confirmPassword || changePasswordMutation.isPending}
-                    data-testid="button-confirm-change-password"
-                  >
-                    {changePasswordMutation.isPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    ) : null}
-                    Alterar Password
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
             <main 
               className="flex-1 overflow-auto p-3 sm:p-4 md:p-8 padel-bg"
               style={{

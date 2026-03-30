@@ -875,12 +875,12 @@ export default function Nonstop() {
       </div>
 
       <div className="space-y-6">
-        <div className="sticky top-24 z-40 rounded-xl bg-slate-50/75 backdrop-blur-md supports-[backdrop-filter]:bg-slate-50/70">
-          <Card className="overflow-hidden border-2 border-slate-800 bg-slate-50/95 shadow-lg">
+        <div className="sticky top-0 z-50 pt-1">
+          <Card className="overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-xl">
             <CardHeader className="bg-slate-900 text-white p-3">
               <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
             </CardHeader>
-            <CardContent className="p-0 max-h-[42vh] overflow-auto bg-slate-50/95">
+            <CardContent className="p-0 max-h-[42vh] overflow-auto bg-slate-100">
               <Table>
                 <TableHeader className="bg-orange-600 text-white">
                   <TableRow className="hover:bg-orange-600">

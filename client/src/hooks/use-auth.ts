@@ -7,19 +7,26 @@ interface AuthUser {
 }
 
 async function fetchUser(): Promise<AuthUser | null> {
-  const response = await fetch("/api/auth/user", {
-    credentials: "include",
-  });
+  try {
+    const response = await fetch("/api/auth/user", {
+      credentials: "include",
+    });
 
-  if (response.status === 401) {
+    if (response.status === 401) {
+      return null;
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.error("[auth/user] unexpected response:", response.status, body);
+      return null;
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error("[auth/user] request failed:", error);
     return null;
   }
-
-  if (!response.ok) {
-    throw new Error(`${response.status}: ${response.statusText}`);
-  }
-
-  return response.json();
 }
 
 async function logoutFn(): Promise<void> {

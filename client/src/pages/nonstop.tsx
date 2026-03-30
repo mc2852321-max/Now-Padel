@@ -726,16 +726,18 @@ export default function Nonstop() {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+      <div className="space-y-6 xl:col-span-4 xl:sticky xl:top-24 xl:self-start">
       <Card className="overflow-hidden border-2 border-slate-800">
         <CardHeader className="bg-slate-900 text-white p-4">
-          <CardTitle className="text-sm uppercase tracking-widest text-center">Gestao de Duplas</CardTitle>
+          <CardTitle className="text-sm uppercase tracking-widest text-center">Gestão de Duplas</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader className="bg-slate-100">
               <TableRow>
                 <TableHead>Dupla</TableHead>
-                <TableHead className="text-right w-40">Acoes</TableHead>
+                <TableHead className="text-right w-40">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -788,7 +790,7 @@ export default function Nonstop() {
               {!teams?.length && (
                 <TableRow>
                   <TableCell colSpan={2} className="h-16 text-center text-muted-foreground">
-                    Ainda nao existem duplas.
+                    Ainda não existem duplas.
                   </TableCell>
                 </TableRow>
               )}
@@ -797,11 +799,11 @@ export default function Nonstop() {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden border-2 border-slate-800 md:sticky md:top-24 md:z-20">
+      <Card className="overflow-hidden border-2 border-slate-800">
         <CardHeader className="bg-slate-900 text-white p-4">
           <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
         </CardHeader>
-        <CardContent className="p-0 md:max-h-[45vh] md:overflow-auto">
+        <CardContent className="p-0 max-h-[45vh] overflow-auto">
           <Table>
             <TableHeader className="bg-orange-600 text-white">
               <TableRow className="hover:bg-orange-600">
@@ -840,7 +842,9 @@ export default function Nonstop() {
         </CardContent>
       </Card>
 
-      <div className="space-y-6">
+      </div>
+
+      <div className="space-y-6 xl:col-span-8">
         {Array.from({ length: numRounds }).map((_, rIdx) => {
           const roundNum = rIdx + 1;
           return (
@@ -920,16 +924,17 @@ export default function Nonstop() {
           );
         })}
       </div>
+      </div>
 
       <Dialog open={!!editingTeam} onOpenChange={() => setEditingTeam(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Editar Dupla</DialogTitle>
+            <DialogTitle>Editar dupla</DialogTitle>
           </DialogHeader>
           {editingTeam && (
             <TeamForm
               defaultValues={editingTeam}
-              submitLabel="Guardar Alteracoes"
+              submitLabel="Guardar alterações"
               onSubmit={(data) => updateTeamMutation.mutate({ id: editingTeam.id, data })}
             />
           )}
@@ -963,7 +968,7 @@ function TeamForm({
           name="name"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Nome da Dupla</FormLabel>
+              <FormLabel>Nome da dupla</FormLabel>
               <FormControl><Input placeholder="Ex: João e Maria" {...field} /></FormControl>
               <FormMessage />
             </FormItem>

@@ -267,25 +267,25 @@ function App() {
         <div className="flex h-screen w-full bg-background">
           <AppSidebar />
           <div className="flex flex-col flex-1 overflow-hidden">
-            <header className="flex items-center justify-between gap-4 px-6 h-24 shrink-0 shadow-xl bg-slate-900 border-b-4 border-orange-500 z-50 relative">
-              <div className="flex items-center gap-4">
+            <header className="flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-4 md:px-6 h-16 md:h-24 shrink-0 shadow-xl bg-slate-900 border-b-4 border-orange-500 z-50 relative">
+              <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                 <SidebarTrigger data-testid="button-sidebar-toggle" className="text-white hover:bg-slate-700" />
-                <img src={logoToDisplay} alt="Logo" className="h-14 w-auto bg-white rounded-lg p-1" />
-                <h1 className="text-2xl font-extrabold tracking-wide text-orange-500">
+                <img src={logoToDisplay} alt="Logo" className="h-10 sm:h-12 md:h-14 w-auto bg-white rounded-lg p-1" />
+                <h1 className="text-lg sm:text-xl md:text-2xl font-extrabold tracking-wide text-orange-500 truncate">
                   {settings?.clubName || "Painel de Gestão"}
                 </h1>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                 {user && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button 
                         variant="ghost" 
-                        className="gap-2 text-white hover:bg-slate-700 px-4 py-2"
+                        className="gap-2 text-white hover:bg-slate-700 px-2 sm:px-4 py-2"
                         data-testid="button-user-menu"
                       >
                         <User className="w-5 h-5" />
-                        <span className="font-medium">{user.name || user.email}</span>
+                        <span className="hidden md:inline font-medium max-w-44 truncate">{user.name || user.email}</span>
                         <ChevronDown className="w-4 h-4" />
                       </Button>
                     </DropdownMenuTrigger>
@@ -410,12 +410,12 @@ function App() {
               </DialogContent>
             </Dialog>
             <main 
-              className="flex-1 overflow-auto p-8 padel-bg"
+              className="flex-1 overflow-auto p-3 sm:p-4 md:p-8 padel-bg"
               style={{
                 backgroundImage: `url(${padelBgImage})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
-                backgroundAttachment: 'fixed'
+                backgroundAttachment: 'scroll'
               }}
             >
               <div className="padel-overlay" />
@@ -436,3 +436,4 @@ export default function AppWrapper() {
     </QueryClientProvider>
   );
 }
+

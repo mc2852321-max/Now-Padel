@@ -321,17 +321,17 @@ export default function Settings() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-10">
+    <div className="w-full max-w-5xl mx-auto space-y-6 pb-10">
       <div className="flex flex-col gap-2">
         <h2 className="text-3xl font-bold tracking-tight">Configurações</h2>
         <p className="text-muted-foreground">Gerencie as configurações do seu clube.</p>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="nonstop" data-testid="tab-nonstop">Non Stop</TabsTrigger>
-          <TabsTrigger value="visual" data-testid="tab-visual">Identidade Visual</TabsTrigger>
-          <TabsTrigger value="access" data-testid="tab-access">Acesso</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-3 h-auto">
+          <TabsTrigger className="text-[11px] sm:text-sm" value="nonstop" data-testid="tab-nonstop">Non Stop</TabsTrigger>
+          <TabsTrigger className="text-[11px] sm:text-sm" value="visual" data-testid="tab-visual">Identidade Visual</TabsTrigger>
+          <TabsTrigger className="text-[11px] sm:text-sm" value="access" data-testid="tab-access">Acesso</TabsTrigger>
         </TabsList>
 
         {activeTab !== "access" && (
@@ -344,7 +344,7 @@ export default function Settings() {
                   <CardDescription>Defina os parâmetros base para o Non Stop.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <FormField control={form.control} name="nonstopCourts" render={({ field }) => (
                       <FormItem>
                         <FormLabel>Campos em Jogo</FormLabel>
@@ -367,7 +367,7 @@ export default function Settings() {
                   
                   <div className="space-y-3">
                     <FormLabel>Tempos (Minutos)</FormLabel>
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <FormField control={form.control} name="warmupTime" render={({ field }) => (
                         <FormItem>
                           <span className="text-xs uppercase text-muted-foreground">Aquecimento</span>
@@ -742,7 +742,7 @@ export default function Settings() {
               </Card>
             </TabsContent>
 
-              <div className="flex justify-end gap-3 pt-4">
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-4">
                 <Button 
                   type="button" 
                   variant="secondary" 
@@ -773,7 +773,7 @@ export default function Settings() {
                 >
                   Cancelar
                 </Button>
-                <Button type="submit" className="px-12" disabled={mutation.isPending} data-testid="button-save-settings">
+                <Button type="submit" className="px-6 sm:px-12" disabled={mutation.isPending} data-testid="button-save-settings">
                   {mutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                   Guardar Alterações
                 </Button>

@@ -104,10 +104,33 @@ export default function Nonstop() {
       osc2.stop(ctx.currentTime + delay + duration);
     };
 
+    const playAirHornSample = (durationSeconds: number) => {
+      const audio = new Audio("/sounds/air-horn.mpeg");
+      audio.preload = "auto";
+      audio.currentTime = 0;
+      let stopTimer: ReturnType<typeof setTimeout> | null = null;
+
+      if (durationSeconds > 0) {
+        stopTimer = setTimeout(() => {
+          audio.pause();
+          audio.currentTime = 0;
+        }, durationSeconds * 1000);
+      }
+
+      audio.addEventListener("ended", () => {
+        if (stopTimer) clearTimeout(stopTimer);
+      });
+
+      audio.play().catch(() => {
+        if (stopTimer) clearTimeout(stopTimer);
+        playBeep(0, Math.max(1, durationSeconds), true);
+      });
+    };
+
     const configuredDuration = getConfiguredDuration(soundType, settings);
 
     if (soundType === 'air-horn') {
-      playBeep(0, configuredDuration ?? 5.0, true);
+      playAirHornSample(configuredDuration ?? 5.0);
     } else if (soundType === 'horn' || soundType === 'horn-deep') {
       playBeep(0, configuredDuration ?? 3.0, true); 
     } else if (soundType === 'horn-double') {

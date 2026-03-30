@@ -641,7 +641,7 @@ export default function Settings() {
                               }}
                             />
                           </FormControl>
-                          <FormDescription className="text-xs">A duração aplica-se apenas ao som escolhido acima</FormDescription>
+                          <FormDescription className="text-xs">A duração aplica-se apenas ao som selecionado</FormDescription>
                         </FormItem>
                       )} />
                     </div>

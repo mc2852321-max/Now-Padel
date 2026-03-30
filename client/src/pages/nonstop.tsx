@@ -92,7 +92,8 @@ export default function Nonstop() {
     };
 
     if (soundType === 'air-horn') {
-      playBeep(0, 5.0, true);
+      const airHornDuration = Math.max(1, settings?.airHornDuration || 5);
+      playBeep(0, airHornDuration, true);
     } else if (soundType === 'horn' || soundType === 'horn-deep') {
       playBeep(0, 3.0, true); 
     } else if (soundType === 'horn-double') {

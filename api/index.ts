@@ -46,5 +46,13 @@ export default async function handler(req: any, res: any) {
     });
   }
 
-  app(req, res);
+  try {
+    app(req, res);
+  } catch (error) {
+    console.error("[handler] request crash:", error);
+    return res.status(500).json({
+      message: "Unhandled request error",
+      detail: error instanceof Error ? error.message : "Unknown request error",
+    });
+  }
 }

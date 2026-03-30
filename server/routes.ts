@@ -61,11 +61,16 @@ export async function registerRoutes(
         ssl: shouldUseSsl ? { rejectUnauthorized: false } : undefined,
       });
       const PgSession = connectPgSimple(session);
-      sessionConfig.store = new PgSession({
+      const sessionStore = new PgSession({
         pool: pgPool,
         tableName: 'sessions',
         createTableIfMissing: true,
       });
+      // Prevent unhandled "error" events from crashing the serverless function.
+      sessionStore.on("error", (error) => {
+        console.error("[session] postgres store error:", error);
+      });
+      sessionConfig.store = sessionStore;
     } catch (error) {
       console.error("[session] failed to initialize postgres session store:", error);
     }

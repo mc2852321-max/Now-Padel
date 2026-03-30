@@ -52,7 +52,8 @@ export default function Nonstop() {
 
     const frequency = soundType === 'beep-high' ? 880 : 
                       soundType === 'beep-low' ? 440 :
-                      soundType === 'horn-deep' ? 60 : 
+                      soundType === 'horn-deep' ? 60 :
+                      soundType === 'air-horn' ? 85 :
                       soundType.includes('horn') ? 100 : 440; // Frequency for horn variants
     
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -90,7 +91,9 @@ export default function Nonstop() {
       osc2.stop(ctx.currentTime + delay + duration);
     };
 
-    if (soundType === 'horn' || soundType === 'horn-deep') {
+    if (soundType === 'air-horn') {
+      playBeep(0, 5.0, true);
+    } else if (soundType === 'horn' || soundType === 'horn-deep') {
       playBeep(0, 3.0, true); 
     } else if (soundType === 'horn-double') {
       playBeep(0, 1.2, true);
@@ -266,22 +269,37 @@ export default function Nonstop() {
     const teamAId = matchResult?.teamAId ?? 0;
     const teamBId = matchResult?.teamBId ?? 0;
     if (!teamAId || !teamBId) return;
+    const currentValue = field === "A" ? (matchResult?.scoreA ?? 0) : (matchResult?.scoreB ?? 0);
 
-    updateResultMutation.mutate({
-      ...matchResult,
-      round: roundNum,
-      court: courtNum,
-      scoreA: field === "A" ? safeValue : (matchResult?.scoreA ?? 0),
-      scoreB: field === "B" ? safeValue : (matchResult?.scoreB ?? 0),
-      teamAId,
-      teamBId,
-    });
+    if (safeValue === currentValue) {
+      setScoreDrafts((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
 
-    setScoreDrafts((prev) => {
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
+    updateResultMutation.mutate(
+      {
+        ...matchResult,
+        round: roundNum,
+        court: courtNum,
+        scoreA: field === "A" ? safeValue : (matchResult?.scoreA ?? 0),
+        scoreB: field === "B" ? safeValue : (matchResult?.scoreB ?? 0),
+        teamAId,
+        teamBId,
+      },
+      {
+        onSettled: () => {
+          setScoreDrafts((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+        },
+      }
+    );
   };
 
   const updateResultMutation = useMutation({
@@ -857,12 +875,12 @@ export default function Nonstop() {
       </div>
 
       <div className="space-y-6">
-        <div className="sticky top-24 z-30">
-          <Card className="overflow-hidden border-2 border-slate-800 bg-background shadow-lg">
+        <div className="sticky top-24 z-40 rounded-xl bg-slate-50/75 backdrop-blur-md supports-[backdrop-filter]:bg-slate-50/70">
+          <Card className="overflow-hidden border-2 border-slate-800 bg-slate-50/95 shadow-lg">
             <CardHeader className="bg-slate-900 text-white p-3">
               <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
             </CardHeader>
-            <CardContent className="p-0 max-h-[42vh] overflow-auto">
+            <CardContent className="p-0 max-h-[42vh] overflow-auto bg-slate-50/95">
               <Table>
                 <TableHeader className="bg-orange-600 text-white">
                   <TableRow className="hover:bg-orange-600">

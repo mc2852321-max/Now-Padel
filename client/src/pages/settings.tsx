@@ -20,6 +20,7 @@ export function playPreviewSound(soundType: string) {
   const frequency = soundType === 'beep-high' ? 880 : 
                     soundType === 'beep-low' ? 440 :
                     soundType === 'horn-deep' ? 60 :
+                    soundType === 'air-horn' ? 85 :
                     soundType.includes('horn') ? 100 : 440;
   
   const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -57,7 +58,9 @@ export function playPreviewSound(soundType: string) {
     osc2.stop(ctx.currentTime + delay + duration);
   };
 
-  if (soundType === 'horn' || soundType === 'horn-deep') {
+  if (soundType === 'air-horn') {
+    playBeep(0, 5.0, true);
+  } else if (soundType === 'horn' || soundType === 'horn-deep') {
     playBeep(0, 3.0, true);
   } else if (soundType === 'horn-double') {
     playBeep(0, 1.2, true);
@@ -466,6 +469,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
+                              <SelectItem value="air-horn">Air Horn (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -504,6 +508,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
+                              <SelectItem value="air-horn">Air Horn (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -542,6 +547,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
+                              <SelectItem value="air-horn">Air Horn (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -580,6 +586,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
+                              <SelectItem value="air-horn">Air Horn (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />

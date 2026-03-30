@@ -177,7 +177,7 @@ input::-webkit-password-toggle {
   position: absolute;
   inset: 0;
   background: 
-    linear-gradient(180deg, hsl(30 30% 98% / 0.92) 0%, hsl(35 25% 96% / 0.88) 100%);
+    linear-gradient(180deg, hsl(30 30% 98% / 0.78) 0%, hsl(35 25% 96% / 0.72) 100%);
   pointer-events: none;
   z-index: 0;
 }

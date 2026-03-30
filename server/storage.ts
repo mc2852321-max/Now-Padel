@@ -1,4 +1,4 @@
-import { players, teams, nonstopResults, settings, authorizedUsers, type Player, type InsertPlayer, type UpdatePlayerRequest, type Team, type InsertTeam, type NonstopResult, type InsertNonstopResult, type Settings, type InsertSettings, type AuthorizedUser, type InsertAuthorizedUser } from "@shared/schema";
+import { players, teams, nonstopResults, settings, authorizedUsers, type Player, type InsertPlayer, type UpdatePlayerRequest, type Team, type InsertTeam, type NonstopResult, type InsertNonstopResult, type Settings, type InsertSettings, type AuthorizedUser, type InsertAuthorizedUser } from "../shared/schema";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 

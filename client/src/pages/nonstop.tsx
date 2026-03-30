@@ -767,7 +767,7 @@ export default function Nonstop() {
                           <AlertDialogHeader>
                             <AlertDialogTitle>Apagar dupla?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              A dupla "{team.name}" e todos os jogos associados serao apagados.
+                              A dupla "{team.name}" e todos os jogos associados serão apagados.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
@@ -797,11 +797,11 @@ export default function Nonstop() {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden border-2 border-slate-800">
+      <Card className="overflow-hidden border-2 border-slate-800 md:sticky md:top-24 md:z-20">
         <CardHeader className="bg-slate-900 text-white p-4">
           <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0 md:max-h-[45vh] md:overflow-auto">
           <Table>
             <TableHeader className="bg-orange-600 text-white">
               <TableRow className="hover:bg-orange-600">

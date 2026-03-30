@@ -1,8 +1,8 @@
 import express, { type Express, type RequestHandler } from "express";
 import type { Server } from "http";
-import { storage } from "./storage";
-import { api } from "../shared/routes";
-import { insertTeamSchema, insertAuthorizedUserSchema, loginSchema, changePasswordSchema } from "../shared/schema";
+import { storage } from "./storage.js";
+import { api } from "../shared/routes.js";
+import { insertTeamSchema, insertAuthorizedUserSchema, loginSchema, changePasswordSchema } from "../shared/schema.js";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import session from "express-session";

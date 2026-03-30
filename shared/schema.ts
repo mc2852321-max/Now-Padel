@@ -114,4 +114,4 @@ export const changePasswordSchema = z.object({
 export type ChangePasswordRequest = z.infer<typeof changePasswordSchema>;
 
 // Auth schema exports
-export * from "./models/auth";
+export * from "./models/auth.js";

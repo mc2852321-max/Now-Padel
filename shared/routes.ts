@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { players, insertPlayerSchema, messageSchema } from './schema';
+import { players, insertPlayerSchema, messageSchema } from './schema.js';
 
 export const errorSchemas = {
   validation: z.object({

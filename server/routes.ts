@@ -193,9 +193,14 @@ export async function registerRoutes(
   });
   
   app.get(api.players.list.path, isAuthenticated, async (req, res) => {
-    const level = req.query.level as string | undefined;
-    const players = await storage.getPlayers({ level });
-    res.json(players);
+    try {
+      const level = req.query.level as string | undefined;
+      const players = await storage.getPlayers({ level });
+      res.json(players);
+    } catch (err) {
+      console.error("[players/list] error:", err);
+      res.status(500).json({ message: "Erro ao carregar jogadores" });
+    }
   });
 
   app.post(api.players.create.path, isAuthenticated, async (req, res) => {
@@ -448,6 +453,59 @@ export async function registerRoutes(
 
   // Seed data with new levels
   try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS players (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        phone VARCHAR(20) NOT NULL,
+        level TEXT NOT NULL,
+        notes TEXT
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS teams (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS nonstop_results (
+        id SERIAL PRIMARY KEY,
+        team_a_id INTEGER NOT NULL,
+        team_b_id INTEGER NOT NULL,
+        score_a INTEGER NOT NULL,
+        score_b INTEGER NOT NULL,
+        round INTEGER NOT NULL DEFAULT 1,
+        court INTEGER NOT NULL DEFAULT 1,
+        played_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS settings (
+        id SERIAL PRIMARY KEY,
+        club_name TEXT NOT NULL DEFAULT 'Now Padel & Fit',
+        primary_color TEXT NOT NULL DEFAULT '#f97316',
+        website TEXT NOT NULL DEFAULT 'https://nowpadel.pt',
+        whatsapp_notifications INTEGER NOT NULL DEFAULT 1,
+        email_notifications INTEGER NOT NULL DEFAULT 0,
+        public_registration INTEGER NOT NULL DEFAULT 1,
+        logo TEXT,
+        nonstop_courts INTEGER NOT NULL DEFAULT 3,
+        nonstop_rounds INTEGER NOT NULL DEFAULT 5,
+        game_time INTEGER NOT NULL DEFAULT 20,
+        warmup_time INTEGER NOT NULL DEFAULT 5,
+        rest_time INTEGER NOT NULL DEFAULT 2,
+        start_warmup_sound TEXT NOT NULL DEFAULT 'beep-low',
+        start_game_sound TEXT NOT NULL DEFAULT 'beep-high',
+        end_game_sound TEXT NOT NULL DEFAULT 'beep-low',
+        final_sound TEXT NOT NULL DEFAULT 'beep-high',
+        tie_breaker TEXT NOT NULL DEFAULT 'direct'
+      )
+    `);
+
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS authorized_users (
         id SERIAL PRIMARY KEY,

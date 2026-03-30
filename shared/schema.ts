@@ -45,6 +45,8 @@ export const settings = pgTable("settings", {
   endGameSound: text("end_game_sound").notNull().default("beep-low"),
   finalSound: text("final_sound").notNull().default("beep-high"),
   airHornDuration: integer("air_horn_duration").notNull().default(5),
+  soundDurationTarget: text("sound_duration_target").notNull().default("air-horn"),
+  soundDurationSeconds: integer("sound_duration_seconds").notNull().default(5),
   tieBreaker: text("tie_breaker").notNull().default("direct"), // "direct" or "diff"
 });
 

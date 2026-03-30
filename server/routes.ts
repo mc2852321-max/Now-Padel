@@ -530,6 +530,8 @@ export async function registerRoutes(
         end_game_sound TEXT NOT NULL DEFAULT 'beep-low',
         final_sound TEXT NOT NULL DEFAULT 'beep-high',
         air_horn_duration INTEGER NOT NULL DEFAULT 5,
+        sound_duration_target TEXT NOT NULL DEFAULT 'air-horn',
+        sound_duration_seconds INTEGER NOT NULL DEFAULT 5,
         tie_breaker TEXT NOT NULL DEFAULT 'direct'
       )
     `);
@@ -537,6 +539,16 @@ export async function registerRoutes(
     await db.execute(sql`
       ALTER TABLE settings
       ADD COLUMN IF NOT EXISTS air_horn_duration INTEGER NOT NULL DEFAULT 5
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE settings
+      ADD COLUMN IF NOT EXISTS sound_duration_target TEXT NOT NULL DEFAULT 'air-horn'
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE settings
+      ADD COLUMN IF NOT EXISTS sound_duration_seconds INTEGER NOT NULL DEFAULT 5
     `);
 
     await db.execute(sql`

@@ -20,6 +20,15 @@ import { useState, useEffect } from "react";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 
+function getConfiguredDuration(
+  soundType: string,
+  settings?: Settings
+) {
+  const fallback = Math.max(1, settings?.airHornDuration || 5);
+  const configured = Math.max(1, settings?.soundDurationSeconds || fallback);
+  return soundType === (settings?.soundDurationTarget || "air-horn") ? configured : null;
+}
+
 export default function Nonstop() {
   const { toast } = useToast();
   const { data: settings } = useQuery<Settings>({
@@ -91,17 +100,19 @@ export default function Nonstop() {
       osc2.stop(ctx.currentTime + delay + duration);
     };
 
+    const configuredDuration = getConfiguredDuration(soundType, settings);
+
     if (soundType === 'air-horn') {
-      const airHornDuration = Math.max(1, settings?.airHornDuration || 5);
-      playBeep(0, airHornDuration, true);
+      playBeep(0, configuredDuration ?? 5.0, true);
     } else if (soundType === 'horn' || soundType === 'horn-deep') {
-      playBeep(0, 3.0, true); 
+      playBeep(0, configuredDuration ?? 3.0, true); 
     } else if (soundType === 'horn-double') {
       playBeep(0, 1.2, true);
       playBeep(1.5, 1.5, true);
     } else if (soundType.includes('long')) {
-      playBeep(0, 1.0);
-      playBeep(1.2, 1.0);
+      const duration = configuredDuration ?? 1.0;
+      playBeep(0, duration);
+      playBeep(duration + 0.2, duration);
     } else {
       // Play 3 beeps
       playBeep(0, 0.4);

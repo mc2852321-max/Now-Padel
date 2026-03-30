@@ -17,7 +17,19 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
-export function playPreviewSound(soundType: string, airHornDuration: number = 5) {
+type DurationConfig = {
+  soundDurationTarget?: string;
+  soundDurationSeconds?: number;
+  airHornDuration?: number;
+};
+
+function getConfiguredDuration(soundType: string, config?: DurationConfig) {
+  const fallback = Math.max(1, config?.airHornDuration ?? 5);
+  const configured = Math.max(1, config?.soundDurationSeconds ?? fallback);
+  return soundType === (config?.soundDurationTarget ?? "air-horn") ? configured : null;
+}
+
+export function playPreviewSound(soundType: string, config?: DurationConfig) {
   const frequency = soundType === 'beep-high' ? 880 : 
                     soundType === 'beep-low' ? 440 :
                     soundType === 'horn-deep' ? 60 :
@@ -59,16 +71,19 @@ export function playPreviewSound(soundType: string, airHornDuration: number = 5)
     osc2.stop(ctx.currentTime + delay + duration);
   };
 
+  const configuredDuration = getConfiguredDuration(soundType, config);
+
   if (soundType === 'air-horn') {
-    playBeep(0, Math.max(1, airHornDuration), true);
+    playBeep(0, configuredDuration ?? 5.0, true);
   } else if (soundType === 'horn' || soundType === 'horn-deep') {
-    playBeep(0, 3.0, true);
+    playBeep(0, configuredDuration ?? 3.0, true);
   } else if (soundType === 'horn-double') {
     playBeep(0, 1.2, true);
     playBeep(1.5, 1.5, true);
   } else if (soundType.includes('long')) {
-    playBeep(0, 1.0);
-    playBeep(1.2, 1.0);
+    const duration = configuredDuration ?? 1.0;
+    playBeep(0, duration);
+    playBeep(duration + 0.2, duration);
   } else {
     playBeep(0, 0.4);
     playBeep(0.5, 0.4);
@@ -417,6 +432,8 @@ export default function Settings() {
       gameTime: 20,
       restTime: 2,
       airHornDuration: 5,
+      soundDurationTarget: "air-horn",
+      soundDurationSeconds: 5,
       startWarmupSound: "beep-low",
       startGameSound: "beep-high",
       endGameSound: "beep-low",
@@ -440,6 +457,8 @@ export default function Settings() {
         gameTime: settings.gameTime,
         restTime: settings.restTime,
         airHornDuration: settings.airHornDuration ?? 5,
+        soundDurationTarget: settings.soundDurationTarget ?? "air-horn",
+        soundDurationSeconds: settings.soundDurationSeconds ?? settings.airHornDuration ?? 5,
         startWarmupSound: settings.startWarmupSound,
         startGameSound: settings.startGameSound,
         endGameSound: settings.endGameSound,
@@ -584,11 +603,30 @@ export default function Settings() {
                   </div>
 
                   <div className="space-y-3">
-                    <FormLabel>Duração do Som</FormLabel>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <FormField control={form.control} name="airHornDuration" render={({ field }) => (
+                    <FormLabel>Duração Personalizada do Som</FormLabel>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <FormField control={form.control} name="soundDurationTarget" render={({ field }) => (
                         <FormItem>
-                          <span className="text-xs uppercase text-muted-foreground">Buzina de Ar (segundos)</span>
+                          <span className="text-xs uppercase text-muted-foreground">Som a personalizar</span>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Escolha o som" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="air-horn">Air Horn / Buzina de Ar</SelectItem>
+                              <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
+                              <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
+                              <SelectItem value="beep-low-long">Bip Grave Longo (2x)</SelectItem>
+                              <SelectItem value="beep-high-long">Bip Agudo Longo (2x)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="soundDurationSeconds" render={({ field }) => (
+                        <FormItem>
+                          <span className="text-xs uppercase text-muted-foreground">Duração (segundos)</span>
                           <FormControl>
                             <Input
                               type="number"
@@ -603,7 +641,7 @@ export default function Settings() {
                               }}
                             />
                           </FormControl>
-                          <FormDescription className="text-xs">mínimo 1 segundo, máximo 10 segundos</FormDescription>
+                          <FormDescription className="text-xs">A duração aplica-se apenas ao som escolhido acima</FormDescription>
                         </FormItem>
                       )} />
                     </div>
@@ -630,7 +668,13 @@ export default function Settings() {
                               variant="ghost" 
                               size="icon" 
                               className="h-6 w-6" 
-                              onClick={() => playPreviewSound(field.value, form.getValues("airHornDuration") ?? 5)}
+                              onClick={() =>
+                                playPreviewSound(field.value, {
+                                  airHornDuration: form.getValues("airHornDuration") ?? 5,
+                                  soundDurationTarget: form.getValues("soundDurationTarget"),
+                                  soundDurationSeconds: form.getValues("soundDurationSeconds") ?? 5,
+                                })
+                              }
                               data-testid="button-preview-warmup-sound"
                             >
                               <Volume2 className="h-4 w-4" />
@@ -669,7 +713,13 @@ export default function Settings() {
                               variant="ghost" 
                               size="icon" 
                               className="h-6 w-6" 
-                              onClick={() => playPreviewSound(field.value, form.getValues("airHornDuration") ?? 5)}
+                              onClick={() =>
+                                playPreviewSound(field.value, {
+                                  airHornDuration: form.getValues("airHornDuration") ?? 5,
+                                  soundDurationTarget: form.getValues("soundDurationTarget"),
+                                  soundDurationSeconds: form.getValues("soundDurationSeconds") ?? 5,
+                                })
+                              }
                               data-testid="button-preview-game-sound"
                             >
                               <Volume2 className="h-4 w-4" />
@@ -708,7 +758,13 @@ export default function Settings() {
                               variant="ghost" 
                               size="icon" 
                               className="h-6 w-6" 
-                              onClick={() => playPreviewSound(field.value, form.getValues("airHornDuration") ?? 5)}
+                              onClick={() =>
+                                playPreviewSound(field.value, {
+                                  airHornDuration: form.getValues("airHornDuration") ?? 5,
+                                  soundDurationTarget: form.getValues("soundDurationTarget"),
+                                  soundDurationSeconds: form.getValues("soundDurationSeconds") ?? 5,
+                                })
+                              }
                               data-testid="button-preview-endgame-sound"
                             >
                               <Volume2 className="h-4 w-4" />
@@ -747,7 +803,13 @@ export default function Settings() {
                               variant="ghost" 
                               size="icon" 
                               className="h-6 w-6" 
-                              onClick={() => playPreviewSound(field.value, form.getValues("airHornDuration") ?? 5)}
+                              onClick={() =>
+                                playPreviewSound(field.value, {
+                                  airHornDuration: form.getValues("airHornDuration") ?? 5,
+                                  soundDurationTarget: form.getValues("soundDurationTarget"),
+                                  soundDurationSeconds: form.getValues("soundDurationSeconds") ?? 5,
+                                })
+                              }
                               data-testid="button-preview-final-sound"
                             >
                               <Volume2 className="h-4 w-4" />
@@ -942,6 +1004,8 @@ export default function Settings() {
                         gameTime: settings.gameTime,
                         restTime: settings.restTime,
                         airHornDuration: settings.airHornDuration ?? 5,
+                        soundDurationTarget: settings.soundDurationTarget ?? "air-horn",
+                        soundDurationSeconds: settings.soundDurationSeconds ?? settings.airHornDuration ?? 5,
                         startWarmupSound: settings.startWarmupSound,
                         startGameSound: settings.startGameSound,
                         endGameSound: settings.endGameSound,

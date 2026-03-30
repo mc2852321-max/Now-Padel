@@ -33,9 +33,6 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  private readonly legacySiteNameRegex = /padel\s*loyalty/i;
-  private readonly siteName = "PadelHUB";
-
   async getPlayers(filters?: { level?: string }): Promise<Player[]> {
     if (filters?.level && filters.level !== "all") {
       return await db.select().from(players).where(eq(players.level, filters.level));
@@ -110,14 +107,6 @@ export class DatabaseStorage implements IStorage {
     if (!existing) {
       const [created] = await db.insert(settings).values({}).returning();
       return created;
-    }
-    if (existing.clubName && this.legacySiteNameRegex.test(existing.clubName)) {
-      const [updated] = await db
-        .update(settings)
-        .set({ clubName: this.siteName })
-        .where(eq(settings.id, existing.id))
-        .returning();
-      return updated;
     }
     return existing;
   }

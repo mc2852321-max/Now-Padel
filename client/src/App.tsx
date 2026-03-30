@@ -37,9 +37,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
 
-const SITE_NAME = "PadelHUB";
-const LEGACY_SITE_NAME = /padel\s*loyalty/i;
-
 function Router() {
   return (
     <Switch>
@@ -80,16 +77,16 @@ function LoginPage() {
         backgroundSize: 'cover',
         backgroundPosition: 'center'
       }}
-      >
-        <div className="absolute inset-0 bg-black/40" />
-        <Card className="w-full max-w-md relative z-10 shadow-2xl">
-          <CardHeader className="text-center space-y-4">
-            <img src={logoUrl} alt={SITE_NAME} className="h-16 mx-auto" />
-            <CardTitle className="text-2xl font-bold">Bem-vindo ao {SITE_NAME}</CardTitle>
-            <CardDescription>
-              Faça login para aceder ao painel de gestão do clube
-            </CardDescription>
-          </CardHeader>
+    >
+      <div className="absolute inset-0 bg-black/40" />
+      <Card className="w-full max-w-md relative z-10 shadow-2xl">
+        <CardHeader className="text-center space-y-4">
+          <img src={logoUrl} alt="Now Padel & Fit" className="h-16 mx-auto" />
+          <CardTitle className="text-2xl font-bold">Bem-vindo</CardTitle>
+          <CardDescription>
+            Faça login para aceder ao painel de gestão do clube
+          </CardDescription>
+        </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {(error || loginError) && (
@@ -229,9 +226,6 @@ function App() {
   }
 
   const logoToDisplay = settings?.logo || logoUrl;
-  const clubName = settings?.clubName && LEGACY_SITE_NAME.test(settings.clubName)
-    ? SITE_NAME
-    : settings?.clubName;
 
   const style = {
     "--sidebar-width": "18rem",
@@ -278,7 +272,7 @@ function App() {
                 <SidebarTrigger data-testid="button-sidebar-toggle" className="text-white hover:bg-slate-700" />
                 <img src={logoToDisplay} alt="Logo" className="h-14 w-auto bg-white rounded-lg p-1" />
                 <h1 className="text-2xl font-extrabold tracking-wide text-orange-500">
-                  {clubName || "Painel de Gestão"}
+                  {settings?.clubName || "Painel de Gestão"}
                 </h1>
               </div>
               <div className="flex items-center gap-4">

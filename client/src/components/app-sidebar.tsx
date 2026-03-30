@@ -14,9 +14,6 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar";
 
-const SITE_NAME = "PadelHUB";
-const LEGACY_SITE_NAME = /padel\s*loyalty/i;
-
 const items = [
   {
     title: "Jogadores",
@@ -47,9 +44,6 @@ export function AppSidebar() {
   const { data: settings } = useQuery<SettingsType>({
     queryKey: ["/api/settings"]
   });
-  const clubName = settings?.clubName && LEGACY_SITE_NAME.test(settings.clubName)
-    ? SITE_NAME
-    : settings?.clubName;
 
   return (
     <Sidebar>
@@ -57,7 +51,7 @@ export function AppSidebar() {
         <div className="flex flex-col items-center gap-4">
           <img 
             src={settings?.logo || defaultLogo} 
-            alt={clubName || "Now Padel & Fit"} 
+            alt={settings?.clubName || "Now Padel & Fit"} 
             className="w-32 h-auto" 
           />
         </div>

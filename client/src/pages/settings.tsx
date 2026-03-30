@@ -132,7 +132,7 @@ function AuthorizedUsersSection() {
             <div>
               <CardTitle>Utilizadores Autorizados</CardTitle>
               <CardDescription>
-                Controle quem pode aceder ao painel de gestão do clube.
+                Controla quem pode aceder ao painel de gestão do clube.
               </CardDescription>
             </div>
           </div>
@@ -308,7 +308,7 @@ export default function Settings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
-      toast({ title: "Configurações guardadas", description: "As alterações foram aplicadas com sucesso." });
+      toast({ title: "Definições guardadas", description: "As alterações foram aplicadas com sucesso." });
     }
   });
 
@@ -323,8 +323,8 @@ export default function Settings() {
   return (
     <div className="w-full max-w-5xl mx-auto space-y-6 pb-10">
       <div className="flex flex-col gap-2">
-        <h2 className="text-3xl font-bold tracking-tight">Configurações</h2>
-        <p className="text-muted-foreground">Gerencie as configurações do seu clube.</p>
+        <h2 className="text-3xl font-bold tracking-tight">Definições</h2>
+        <p className="text-muted-foreground">Gere as definições do teu clube.</p>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -458,7 +458,7 @@ export default function Settings() {
                           <Select onValueChange={field.onChange} value={field.value}>
                             <FormControl>
                               <SelectTrigger>
-                                <SelectValue placeholder="Selecione o som" />
+                                <SelectValue placeholder="Escolha o som" />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -469,7 +469,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
-                              <SelectItem value="air-horn">Air Horn (5s)</SelectItem>
+                              <SelectItem value="air-horn">Buzina de Ar (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -497,7 +497,7 @@ export default function Settings() {
                           <Select onValueChange={field.onChange} value={field.value}>
                             <FormControl>
                               <SelectTrigger>
-                                <SelectValue placeholder="Selecione o som" />
+                                <SelectValue placeholder="Escolha o som" />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -508,7 +508,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
-                              <SelectItem value="air-horn">Air Horn (5s)</SelectItem>
+                              <SelectItem value="air-horn">Buzina de Ar (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -536,7 +536,7 @@ export default function Settings() {
                           <Select onValueChange={field.onChange} value={field.value}>
                             <FormControl>
                               <SelectTrigger>
-                                <SelectValue placeholder="Selecione o som" />
+                                <SelectValue placeholder="Escolha o som" />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -547,7 +547,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
-                              <SelectItem value="air-horn">Air Horn (5s)</SelectItem>
+                              <SelectItem value="air-horn">Buzina de Ar (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -575,7 +575,7 @@ export default function Settings() {
                           <Select onValueChange={field.onChange} value={field.value}>
                             <FormControl>
                               <SelectTrigger>
-                                <SelectValue placeholder="Selecione o som" />
+                                <SelectValue placeholder="Escolha o som" />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -586,7 +586,7 @@ export default function Settings() {
                               <SelectItem value="horn">Buzina Forte (Puuuum)</SelectItem>
                               <SelectItem value="horn-deep">Buzina Grave (Puuuum)</SelectItem>
                               <SelectItem value="horn-double">Buzina Dupla (Puum-Puum)</SelectItem>
-                              <SelectItem value="air-horn">Air Horn (5s)</SelectItem>
+                              <SelectItem value="air-horn">Buzina de Ar (5s)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -612,7 +612,7 @@ export default function Settings() {
                         <Select onValueChange={field.onChange} value={field.value}>
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder="Selecione o critério" />
+                              <SelectValue placeholder="Escolha o critério" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>

@@ -31,7 +31,7 @@ const items = [
     icon: MessageSquare,
   },
   {
-    title: "Configurações",
+    title: "Definições",
     url: "/settings",
     icon: Settings,
   },

@@ -542,11 +542,11 @@ function PlayerForm({ defaultValues, onSubmit }: { defaultValues?: any, onSubmit
               <Select onValueChange={field.onChange} defaultValue={field.value}>
                 <FormControl>
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecione uma opção" />
+                    <SelectValue placeholder="Escolha uma opção" />
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  <SelectItem value="placeholder" disabled>Selecione uma opção</SelectItem>
+                  <SelectItem value="placeholder" disabled>Escolha uma opção</SelectItem>
                   {LEVELS.map(l => (
                     <SelectItem key={l} value={l}>{l}</SelectItem>
                   ))}

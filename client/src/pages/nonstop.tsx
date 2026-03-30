@@ -37,6 +37,7 @@ export default function Nonstop() {
   const [isActive, setIsActive] = useState(false);
   const [round, setRound] = useState(1);
   const [isTeamDialogOpen, setIsTeamDialogOpen] = useState(false);
+  const [isManageTeamsOpen, setIsManageTeamsOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
 
   const numCourts = settings?.nonstopCourts || 3;
@@ -715,95 +716,102 @@ export default function Nonstop() {
           <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" className="gap-2" disabled={(teams?.length || 0) >= numTeams}>
-                <Plus className="w-4 h-4" /> Equipa
+                <Plus className="w-4 h-4" /> Adicionar dupla
               </Button>
             </DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>Adicionar Equipa</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>Adicionar dupla</DialogTitle></DialogHeader>
               <TeamForm onSubmit={(data) => createTeamMutation.mutate(data)} key={teams?.length || 0} />
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isManageTeamsOpen} onOpenChange={setIsManageTeamsOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <Edit2 className="w-4 h-4" /> Gerir duplas
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Gerir duplas</DialogTitle>
+              </DialogHeader>
+              <div className="max-h-[60vh] overflow-auto border rounded-md">
+                <Table>
+                  <TableHeader className="bg-slate-100">
+                    <TableRow>
+                      <TableHead>Dupla</TableHead>
+                      <TableHead className="text-right w-36">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(teams || []).map((team) => (
+                      <TableRow key={team.id}>
+                        <TableCell className="font-medium">{team.name}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setEditingTeam(team)}
+                              title="Editar dupla"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="text-destructive hover:text-destructive"
+                                  title="Apagar dupla"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Apagar dupla?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    A dupla "{team.name}" e todos os jogos associados serão apagados.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => deleteTeamMutation.mutate(team.id)}
+                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                  >
+                                    Confirmar
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {!teams?.length && (
+                      <TableRow>
+                        <TableCell colSpan={2} className="h-16 text-center text-muted-foreground">
+                          Ainda não existem duplas.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </DialogContent>
           </Dialog>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-      <div className="space-y-6 xl:col-span-4 xl:sticky xl:top-24 xl:self-start">
-      <Card className="overflow-hidden border-2 border-slate-800">
-        <CardHeader className="bg-slate-900 text-white p-4">
-          <CardTitle className="text-sm uppercase tracking-widest text-center">Gestão de Duplas</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader className="bg-slate-100">
-              <TableRow>
-                <TableHead>Dupla</TableHead>
-                <TableHead className="text-right w-40">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(teams || []).map((team) => (
-                <TableRow key={team.id}>
-                  <TableCell className="font-medium">{team.name}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditingTeam(team)}
-                        title="Editar dupla"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive hover:text-destructive"
-                            title="Apagar dupla"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Apagar dupla?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              A dupla "{team.name}" e todos os jogos associados serão apagados.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => deleteTeamMutation.mutate(team.id)}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            >
-                              Confirmar
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!teams?.length && (
-                <TableRow>
-                  <TableCell colSpan={2} className="h-16 text-center text-muted-foreground">
-                    Ainda não existem duplas.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
+      <div className="space-y-6">
+      
       <Card className="overflow-hidden border-2 border-slate-800">
         <CardHeader className="bg-slate-900 text-white p-4">
           <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
         </CardHeader>
-        <CardContent className="p-0 max-h-[45vh] overflow-auto">
+        <CardContent className="p-0">
           <Table>
             <TableHeader className="bg-orange-600 text-white">
               <TableRow className="hover:bg-orange-600">
@@ -844,7 +852,7 @@ export default function Nonstop() {
 
       </div>
 
-      <div className="space-y-6 xl:col-span-8">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {Array.from({ length: numRounds }).map((_, rIdx) => {
           const roundNum = rIdx + 1;
           return (
@@ -856,12 +864,12 @@ export default function Nonstop() {
                 <Table>
                   <TableHeader className="bg-slate-100">
                     <TableRow className="hover:bg-slate-100">
-                      <TableHead className="w-20 text-center font-bold">CAMPO</TableHead>
-                      <TableHead className="font-bold">EQUIPA A</TableHead>
-                      <TableHead className="w-20 text-center font-bold">RESULTADO</TableHead>
+                      <TableHead className="w-16 text-center font-bold text-xs">CAMPO</TableHead>
+                      <TableHead className="font-bold text-xs">EQUIPA A</TableHead>
+                      <TableHead className="w-16 text-center font-bold text-xs">RESULTADO</TableHead>
                       <TableHead className="w-10 text-center text-muted-foreground font-normal">vs</TableHead>
-                      <TableHead className="w-20 text-center font-bold">RESULTADO</TableHead>
-                      <TableHead className="font-bold">EQUIPA B</TableHead>
+                      <TableHead className="w-16 text-center font-bold text-xs">RESULTADO</TableHead>
+                      <TableHead className="font-bold text-xs">EQUIPA B</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -871,7 +879,7 @@ export default function Nonstop() {
                       return (
                         <TableRow key={courtNum}>
                           <TableCell className="text-center font-bold bg-slate-50 border-r">{courtNum}</TableCell>
-                          <TableCell className="min-w-[200px]">
+                          <TableCell className="min-w-[140px]">
                             <Select 
                               value={matchResult?.teamAId?.toString()} 
                               onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamAId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamBId: matchResult?.teamBId ?? 0 })}
@@ -887,7 +895,7 @@ export default function Nonstop() {
                           <TableCell className="p-0">
                             <Input 
                               type="number" 
-                              className="border-none text-center font-bold focus-visible:ring-0 h-10" 
+                              className="border-none text-center font-bold focus-visible:ring-0 h-9" 
                               value={matchResult?.scoreA ?? ""}
                               onChange={(e) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, scoreA: e.target.value === "" ? 0 : parseInt(e.target.value), scoreB: matchResult?.scoreB ?? 0, teamAId: matchResult?.teamAId ?? 0, teamBId: matchResult?.teamBId ?? 0 })}
                             />
@@ -896,12 +904,12 @@ export default function Nonstop() {
                           <TableCell className="p-0">
                             <Input 
                               type="number" 
-                              className="border-none text-center font-bold focus-visible:ring-0 h-10" 
+                              className="border-none text-center font-bold focus-visible:ring-0 h-9" 
                               value={matchResult?.scoreB ?? ""}
                               onChange={(e) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, scoreB: e.target.value === "" ? 0 : parseInt(e.target.value), scoreA: matchResult?.scoreA ?? 0, teamAId: matchResult?.teamAId ?? 0, teamBId: matchResult?.teamBId ?? 0 })}
                             />
                           </TableCell>
-                          <TableCell className="min-w-[200px]">
+                          <TableCell className="min-w-[140px]">
                             <Select 
                               value={matchResult?.teamBId?.toString()} 
                               onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamBId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamAId: matchResult?.teamAId ?? 0 })}
@@ -923,7 +931,6 @@ export default function Nonstop() {
             </Card>
           );
         })}
-      </div>
       </div>
 
       <Dialog open={!!editingTeam} onOpenChange={() => setEditingTeam(null)}>
@@ -979,3 +986,4 @@ function TeamForm({
     </Form>
   );
 }
+

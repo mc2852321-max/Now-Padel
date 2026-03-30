@@ -415,6 +415,7 @@ function App() {
                 backgroundImage: `url(${padelBgImage})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
                 backgroundAttachment: 'scroll'
               }}
             >

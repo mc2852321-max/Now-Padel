@@ -18,9 +18,18 @@ export const api = {
       path: '/api/players',
       input: z.object({
         level: z.string().optional(),
+        search: z.string().optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(100).optional(),
       }).optional(),
       responses: {
-        200: z.array(z.custom<typeof players.$inferSelect>()),
+        200: z.object({
+          items: z.array(z.custom<typeof players.$inferSelect>()),
+          total: z.number(),
+          page: z.number(),
+          pageSize: z.number(),
+          totalPages: z.number(),
+        }),
       },
     },
     create: {
@@ -75,4 +84,4 @@ export function buildUrl(path: string, params?: Record<string, string | number>)
   return url;
 }
 
-export type PlayerResponse = z.infer<typeof api.players.list.responses[200]>[number];
+export type PlayerResponse = z.infer<typeof api.players.list.responses[200]>["items"][number];

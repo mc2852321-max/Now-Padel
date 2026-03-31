@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/popover";
 import { SiWhatsapp } from "react-icons/si";
 import { Plus, Trash2, Edit2, Filter, Clock, Calendar as CalendarIcon, Search } from "lucide-react";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { openWhatsApp } from "@/lib/whatsapp";
 import { useForm } from "react-hook-form";
@@ -49,14 +49,25 @@ import { pt } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
 const LEVELS = ["M2", "M3", "M4", "M5", "M6", "F2", "F3", "F4", "F5", "F6"];
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
 const MINUTES = ["00", "30"];
+
+type PlayersPageResponse = {
+  items: Player[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
 
 export default function Players() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [searchText, setSearchText] = useState<string>("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   
@@ -71,30 +82,47 @@ export default function Players() {
   const whatsappWindowRef = useRef<Window | null>(null);
   const { toast } = useToast();
 
-  const queryKey = levelFilter === "all" ? ["/api/players"] : ["/api/players", { level: levelFilter }];
+  const queryKey = ["/api/players", { level: levelFilter, search: searchText, page, pageSize }];
 
-  const { data: players = [], isLoading } = useQuery<Player[]>({
+  const { data, isLoading } = useQuery<PlayersPageResponse>({
     queryKey,
     queryFn: async ({ queryKey }) => {
-      const [url, params] = queryKey as [string, { level?: string }?];
+      const [url, params] = queryKey as [string, { level: string; search: string; page: number; pageSize: number }];
       const searchParams = new URLSearchParams();
-      if (params?.level) {
+      if (params.level && params.level !== "all") {
         searchParams.append("level", params.level);
       }
-      const queryString = searchParams.toString();
-      const finalUrl = queryString ? `${url}?${queryString}` : url;
-      const res = await fetch(finalUrl);
-      if (!res.ok) {
-        return [];
+      if (params.search.trim()) {
+        searchParams.append("search", params.search.trim());
       }
-      const data = await res.json();
-      return Array.isArray(data) ? data : [];
+      searchParams.append("page", String(params.page));
+      searchParams.append("pageSize", String(params.pageSize));
+
+      const res = await fetch(`${url}?${searchParams.toString()}`);
+      if (!res.ok) {
+        return { items: [], total: 0, page: 1, pageSize: params.pageSize, totalPages: 1 };
+      }
+      const response = await res.json();
+      if (!response || !Array.isArray(response.items)) {
+        return { items: [], total: 0, page: 1, pageSize: params.pageSize, totalPages: 1 };
+      }
+      return response as PlayersPageResponse;
     }
   });
 
-  const { data: settings } = useQuery<Settings>({
-    queryKey: ["/api/settings"],
-  });
+  const players = data?.items ?? [];
+  const totalPlayers = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
+
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [page, pageSize, levelFilter, searchText]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const parseArrayField = (value?: string | null) => {
     if (!value) return [] as string[];
@@ -104,12 +132,6 @@ export default function Players() {
     } catch {}
     return [];
   };
-
-  const checklistOptions = (() => {
-    const parsed = parseArrayField(settings?.playerProfileOptions);
-    if (parsed.length > 0) return parsed;
-    return ["Academia", "Fecha jogos", "Non Stop"];
-  })();
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -135,17 +157,6 @@ export default function Players() {
     }
   });
 
-  const togglePlayerProfileTag = (player: Player, option: string) => {
-    const currentTags = parseArrayField(player.profileTags);
-    const nextTags = currentTags.includes(option)
-      ? currentTags.filter((tag) => tag !== option)
-      : [...currentTags, option];
-    updateMutation.mutate({
-      id: player.id,
-      data: { profileTags: JSON.stringify(nextTags) },
-    });
-  };
-
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
       await apiRequest("DELETE", buildUrl(api.players.delete.path, { id }));
@@ -160,13 +171,6 @@ export default function Players() {
     return <div className="flex items-center justify-center h-64">A carregar jogadores...</div>;
   }
 
-  const filteredPlayers = players?.filter(player => {
-    if (!searchText.trim()) return true;
-    const search = searchText.toLowerCase().trim();
-    return player.name.toLowerCase().includes(search) || 
-           player.phone.includes(search);
-  }) || [];
-
   const toggleSelect = (id: number) => {
     setSelectedIds(prev => 
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
@@ -174,10 +178,10 @@ export default function Players() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === filteredPlayers.length) {
+    if (selectedIds.length === players.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(filteredPlayers.map(p => p.id));
+      setSelectedIds(players.map(p => p.id));
     }
   };
 
@@ -263,14 +267,23 @@ export default function Players() {
               type="text"
               placeholder="Pesquisar nome ou telefone..."
               value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
+              onChange={(e) => {
+                setSearchText(e.target.value);
+                setPage(1);
+              }}
               className="w-[200px]"
               data-testid="input-search-players"
             />
           </div>
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-muted-foreground" />
-            <Select value={levelFilter} onValueChange={setLevelFilter}>
+            <Select
+              value={levelFilter}
+              onValueChange={(value) => {
+                setLevelFilter(value);
+                setPage(1);
+              }}
+            >
               <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="Nível" />
               </SelectTrigger>
@@ -427,7 +440,7 @@ export default function Players() {
               <TableRow>
                 <TableHead className="w-12 px-4">
                   <Checkbox 
-                    checked={selectedIds.length === filteredPlayers.length && filteredPlayers.length > 0}
+                    checked={selectedIds.length === players.length && players.length > 0}
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
@@ -440,7 +453,7 @@ export default function Players() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredPlayers.map((player) => (
+              {players.map((player) => (
                 <TableRow key={player.id} className={selectedIds.includes(player.id) ? "bg-muted/50" : ""}>
                   <TableCell className="px-4">
                     <Checkbox 
@@ -453,21 +466,22 @@ export default function Players() {
                   <TableCell>
                     <Badge variant="outline">{player.level}</Badge>
                   </TableCell>
-                  <TableCell className="min-w-[240px]">
-                    <div className="flex flex-wrap gap-3">
-                      {checklistOptions.map((option) => {
-                        const checked = parseArrayField(player.profileTags).includes(option);
-                        return (
-                          <label key={`${player.id}-${option}`} className="flex items-center gap-1.5 text-xs">
-                            <Checkbox
-                              checked={checked}
-                              onCheckedChange={() => togglePlayerProfileTag(player, option)}
-                            />
-                            <span>{option}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
+                  <TableCell className="max-w-[300px]">
+                    {(() => {
+                      const selectedTags = parseArrayField(player.profileTags);
+                      if (selectedTags.length === 0) {
+                        return <span className="text-muted-foreground">-</span>;
+                      }
+                      return (
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedTags.map((tag) => (
+                            <Badge key={`${player.id}-${tag}`} variant="secondary" className="text-[11px]">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="max-w-[200px] truncate text-muted-foreground">
                     {player.notes || "-"}
@@ -501,7 +515,7 @@ export default function Players() {
                   </TableCell>
                 </TableRow>
               ))}
-              {!players?.length && (
+              {!players.length && (
                 <TableRow>
                   <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                     Nenhum jogador encontrado.
@@ -512,6 +526,42 @@ export default function Players() {
           </Table>
         </CardContent>
       </Card>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-muted-foreground">
+          {totalPlayers > 0
+            ? `A mostrar ${((page - 1) * pageSize) + 1}-${Math.min(page * pageSize, totalPlayers)} de ${totalPlayers} jogadores`
+            : "Sem jogadores para mostrar"}
+        </p>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Por página</span>
+          <Select
+            value={String(pageSize)}
+            onValueChange={(value) => {
+              setPageSize(Number(value));
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-[90px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <SelectItem key={size} value={String(size)}>{size}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+            Anterior
+          </Button>
+          <span className="text-sm min-w-[90px] text-center">
+            Página {page} / {Math.max(1, totalPages)}
+          </span>
+          <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
+            Seguinte
+          </Button>
+        </div>
+      </div>
 
       <Dialog open={!!editingPlayer} onOpenChange={() => setEditingPlayer(null)}>
         <DialogContent>

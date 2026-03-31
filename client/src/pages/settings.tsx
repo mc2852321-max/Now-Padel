@@ -538,9 +538,10 @@ export default function Settings() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 h-auto">
+        <TabsList className="grid w-full grid-cols-4 h-auto">
           <TabsTrigger className="text-[11px] sm:text-sm" value="nonstop" data-testid="tab-nonstop">Non Stop</TabsTrigger>
           <TabsTrigger className="text-[11px] sm:text-sm" value="visual" data-testid="tab-visual">Identidade Visual</TabsTrigger>
+          <TabsTrigger className="text-[11px] sm:text-sm" value="players" data-testid="tab-players">Jogadores</TabsTrigger>
           <TabsTrigger className="text-[11px] sm:text-sm" value="access" data-testid="tab-access">Acesso</TabsTrigger>
         </TabsList>
 
@@ -577,7 +578,7 @@ export default function Settings() {
                   
                   <div className="space-y-3">
                     <FormLabel>Tempos (Minutos)</FormLabel>
-                    <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <FormField control={form.control} name="gameTime" render={({ field }) => (
                         <FormItem>
                           <span className="text-xs uppercase text-muted-foreground">Jogo</span>
@@ -989,6 +990,17 @@ export default function Settings() {
                     </div>
                   </div>
 
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="players" className="space-y-6 mt-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Configurações dos Jogadores</CardTitle>
+                  <CardDescription>Defina os campos de checklist disponíveis no perfil de cada jogador.</CardDescription>
+                </CardHeader>
+                <CardContent>
                   <FormField
                     control={form.control}
                     name="playerProfileOptions"
@@ -997,7 +1009,7 @@ export default function Settings() {
                         <FormLabel>Checklist de Jogadores</FormLabel>
                         <FormControl>
                           <textarea
-                            className="w-full min-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            className="w-full min-h-[140px] rounded-md border border-input bg-background px-3 py-2 text-sm"
                             placeholder={"Academia\nFecha jogos\nNon Stop"}
                             {...field}
                           />

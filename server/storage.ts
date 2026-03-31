@@ -1,10 +1,19 @@
 import { players, teams, nonstopResults, settings, authorizedUsers, type Player, type InsertPlayer, type UpdatePlayerRequest, type Team, type InsertTeam, type NonstopResult, type InsertNonstopResult, type Settings, type InsertSettings, type AuthorizedUser, type InsertAuthorizedUser } from "../shared/schema.js";
 import { db } from "./db.js";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, ilike, desc, count } from "drizzle-orm";
+
+export type PlayersPage = {
+  items: Player[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
 
 export interface IStorage {
   // Players
   getPlayers(filters?: { level?: string }): Promise<Player[]>;
+  getPlayersPaginated(filters?: { level?: string; search?: string; page?: number; pageSize?: number }): Promise<PlayersPage>;
   createPlayer(player: InsertPlayer): Promise<Player>;
   updatePlayer(id: number, player: UpdatePlayerRequest): Promise<Player>;
   deletePlayer(id: number): Promise<void>;
@@ -41,6 +50,55 @@ export class DatabaseStorage implements IStorage {
       return await db.select().from(players).where(eq(players.level, filters.level));
     }
     return await db.select().from(players);
+  }
+
+  async getPlayersPaginated(filters?: { level?: string; search?: string; page?: number; pageSize?: number }): Promise<PlayersPage> {
+    const requestedPage = Number.isFinite(filters?.page) ? Number(filters?.page) : 1;
+    const requestedPageSize = Number.isFinite(filters?.pageSize) ? Number(filters?.pageSize) : 25;
+    const page = Math.max(1, Math.trunc(requestedPage));
+    const pageSize = Math.min(100, Math.max(1, Math.trunc(requestedPageSize)));
+    const search = (filters?.search ?? "").trim();
+
+    const conditions: any[] = [];
+    if (filters?.level && filters.level !== "all") {
+      conditions.push(eq(players.level, filters.level));
+    }
+    if (search) {
+      conditions.push(
+        or(
+          ilike(players.name, `%${search}%`),
+          ilike(players.phone, `%${search}%`),
+        )!,
+      );
+    }
+
+    const whereClause = conditions.length > 1
+      ? and(...conditions)
+      : conditions[0];
+
+    const countQuery = whereClause
+      ? db.select({ total: count() }).from(players).where(whereClause)
+      : db.select({ total: count() }).from(players);
+    const [{ total }] = await countQuery;
+
+    const dataQuery = whereClause
+      ? db
+          .select()
+          .from(players)
+          .where(whereClause)
+          .orderBy(desc(players.id))
+          .limit(pageSize)
+          .offset((page - 1) * pageSize)
+      : db
+          .select()
+          .from(players)
+          .orderBy(desc(players.id))
+          .limit(pageSize)
+          .offset((page - 1) * pageSize);
+    const items = await dataQuery;
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    return { items, total, page, pageSize, totalPages };
   }
 
   async createPlayer(insertPlayer: InsertPlayer): Promise<Player> {

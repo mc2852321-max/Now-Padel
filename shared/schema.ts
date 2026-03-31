@@ -80,7 +80,13 @@ export type InsertSettings = z.infer<typeof insertSettingsSchema>;
 export type CreatePlayerRequest = InsertPlayer;
 export type UpdatePlayerRequest = Partial<InsertPlayer>;
 export type PlayerResponse = Player;
-export type PlayersListResponse = Player[];
+export type PlayersListResponse = {
+  items: Player[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
 
 export const messageSchema = z.object({
   playerIds: z.array(z.number()),

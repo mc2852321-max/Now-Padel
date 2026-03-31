@@ -489,8 +489,14 @@ export async function registerRoutes(
         name TEXT NOT NULL,
         phone VARCHAR(20) NOT NULL,
         level TEXT NOT NULL,
-        notes TEXT
+        notes TEXT,
+        profile_tags TEXT NOT NULL DEFAULT '[]'
       )
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE players
+      ADD COLUMN IF NOT EXISTS profile_tags TEXT NOT NULL DEFAULT '[]'
     `);
 
     await db.execute(sql`
@@ -535,7 +541,8 @@ export async function registerRoutes(
         air_horn_duration INTEGER NOT NULL DEFAULT 5,
         sound_duration_target TEXT NOT NULL DEFAULT 'air-horn',
         sound_duration_seconds INTEGER NOT NULL DEFAULT 5,
-        tie_breaker TEXT NOT NULL DEFAULT 'direct'
+        tie_breaker TEXT NOT NULL DEFAULT 'direct',
+        player_profile_options TEXT NOT NULL DEFAULT '["Academia","Fecha jogos","Non Stop"]'
       )
     `);
 
@@ -552,6 +559,11 @@ export async function registerRoutes(
     await db.execute(sql`
       ALTER TABLE settings
       ADD COLUMN IF NOT EXISTS sound_duration_seconds INTEGER NOT NULL DEFAULT 5
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE settings
+      ADD COLUMN IF NOT EXISTS player_profile_options TEXT NOT NULL DEFAULT '["Academia","Fecha jogos","Non Stop"]'
     `);
 
     await db.execute(sql`

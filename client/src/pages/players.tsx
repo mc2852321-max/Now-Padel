@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Player, insertPlayerSchema } from "@shared/schema";
+import { Player, Settings, insertPlayerSchema } from "@shared/schema";
 import { api, buildUrl } from "@shared/routes";
 import {
   Table,
@@ -92,6 +92,25 @@ export default function Players() {
     }
   });
 
+  const { data: settings } = useQuery<Settings>({
+    queryKey: ["/api/settings"],
+  });
+
+  const parseArrayField = (value?: string | null) => {
+    if (!value) return [] as string[];
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map((item) => String(item));
+    } catch {}
+    return [];
+  };
+
+  const checklistOptions = (() => {
+    const parsed = parseArrayField(settings?.playerProfileOptions);
+    if (parsed.length > 0) return parsed;
+    return ["Academia", "Fecha jogos", "Non Stop"];
+  })();
+
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
       const res = await apiRequest("POST", api.players.create.path, data);
@@ -115,6 +134,17 @@ export default function Players() {
       toast({ title: "Sucesso", description: "Jogador atualizado com sucesso" });
     }
   });
+
+  const togglePlayerProfileTag = (player: Player, option: string) => {
+    const currentTags = parseArrayField(player.profileTags);
+    const nextTags = currentTags.includes(option)
+      ? currentTags.filter((tag) => tag !== option)
+      : [...currentTags, option];
+    updateMutation.mutate({
+      id: player.id,
+      data: { profileTags: JSON.stringify(nextTags) },
+    });
+  };
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -404,6 +434,7 @@ export default function Players() {
                 <TableHead>Nome</TableHead>
                 <TableHead>Telemóvel</TableHead>
                 <TableHead>Nível</TableHead>
+                <TableHead>Perfil</TableHead>
                 <TableHead>Notas</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
@@ -421,6 +452,22 @@ export default function Players() {
                   <TableCell>{player.phone}</TableCell>
                   <TableCell>
                     <Badge variant="outline">{player.level}</Badge>
+                  </TableCell>
+                  <TableCell className="min-w-[240px]">
+                    <div className="flex flex-wrap gap-3">
+                      {checklistOptions.map((option) => {
+                        const checked = parseArrayField(player.profileTags).includes(option);
+                        return (
+                          <label key={`${player.id}-${option}`} className="flex items-center gap-1.5 text-xs">
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={() => togglePlayerProfileTag(player, option)}
+                            />
+                            <span>{option}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </TableCell>
                   <TableCell className="max-w-[200px] truncate text-muted-foreground">
                     {player.notes || "-"}
@@ -456,7 +503,7 @@ export default function Players() {
               ))}
               {!players?.length && (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                     Nenhum jogador encontrado.
                   </TableCell>
                 </TableRow>
@@ -484,15 +531,37 @@ export default function Players() {
 }
 
 function PlayerForm({ defaultValues, onSubmit }: { defaultValues?: any, onSubmit: (data: any) => void }) {
+  const { data: settings } = useQuery<Settings>({
+    queryKey: ["/api/settings"],
+  });
+
+  const parseArrayField = (value?: string | null) => {
+    if (!value) return [] as string[];
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map((item) => String(item));
+    } catch {}
+    return [];
+  };
+
+  const checklistOptions = (() => {
+    const parsed = parseArrayField(settings?.playerProfileOptions);
+    if (parsed.length > 0) return parsed;
+    return ["Academia", "Fecha jogos", "Non Stop"];
+  })();
+
   const form = useForm({
     resolver: zodResolver(insertPlayerSchema),
     defaultValues: defaultValues || {
       name: "",
       phone: "",
       level: "placeholder",
-      notes: ""
+      notes: "",
+      profileTags: "[]",
     }
   });
+
+  const selectedTags = parseArrayField(form.watch("profileTags"));
 
   return (
     <Form {...form}>
@@ -551,6 +620,37 @@ function PlayerForm({ defaultValues, onSubmit }: { defaultValues?: any, onSubmit
                   ))}
                 </SelectContent>
               </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="profileTags"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Perfil do Jogador</FormLabel>
+              <FormControl>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-md border p-3">
+                  {checklistOptions.map((option) => {
+                    const checked = selectedTags.includes(option);
+                    return (
+                      <label key={`form-${option}`} className="flex items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => {
+                            const next = checked
+                              ? selectedTags.filter((tag) => tag !== option)
+                              : [...selectedTags, option];
+                            field.onChange(JSON.stringify(next));
+                          }}
+                        />
+                        <span>{option}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </FormControl>
               <FormMessage />
             </FormItem>
           )}

@@ -8,6 +8,7 @@ export const players = pgTable("players", {
   phone: varchar("phone", { length: 20 }).notNull(),
   level: text("level").notNull(), // M2, M3, M4, M5, M6, F2, F3, F4, F5, F6
   notes: text("notes"),
+  profileTags: text("profile_tags").notNull().default("[]"),
 });
 
 export const teams = pgTable("teams", {
@@ -48,6 +49,7 @@ export const settings = pgTable("settings", {
   soundDurationTarget: text("sound_duration_target").notNull().default("air-horn"),
   soundDurationSeconds: integer("sound_duration_seconds").notNull().default(5),
   tieBreaker: text("tie_breaker").notNull().default("direct"), // "direct" or "diff"
+  playerProfileOptions: text("player_profile_options").notNull().default("[\"Academia\",\"Fecha jogos\",\"Non Stop\"]"),
 });
 
 export const insertPlayerSchema = createInsertSchema(players).omit({ id: true }).extend({

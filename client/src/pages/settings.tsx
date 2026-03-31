@@ -457,6 +457,7 @@ export default function Settings() {
       airHornDuration: 5,
       soundDurationTarget: "air-horn",
       soundDurationSeconds: 5,
+      playerProfileOptions: "Academia\nFecha jogos\nNon Stop",
       startWarmupSound: "beep-low",
       startGameSound: "beep-high",
       endGameSound: "beep-low",
@@ -482,6 +483,13 @@ export default function Settings() {
         airHornDuration: settings.airHornDuration ?? 5,
         soundDurationTarget: settings.soundDurationTarget ?? "air-horn",
         soundDurationSeconds: settings.soundDurationSeconds ?? settings.airHornDuration ?? 5,
+        playerProfileOptions: (() => {
+          try {
+            const parsed = JSON.parse(settings.playerProfileOptions ?? "[]");
+            if (Array.isArray(parsed)) return parsed.join("\n");
+          } catch {}
+          return "Academia\nFecha jogos\nNon Stop";
+        })(),
         startWarmupSound: settings.startWarmupSound,
         startGameSound: settings.startGameSound,
         endGameSound: settings.endGameSound,
@@ -495,8 +503,13 @@ export default function Settings() {
 
   const mutation = useMutation({
     mutationFn: async (data: any) => {
+      const profileOptions = String(data.playerProfileOptions ?? "")
+        .split("\n")
+        .map((opt) => opt.trim())
+        .filter(Boolean);
       const res = await apiRequest("POST", "/api/settings", {
         ...data,
+        playerProfileOptions: JSON.stringify(profileOptions),
         whatsappNotifications: data.whatsappNotifications ? 1 : 0,
         emailNotifications: data.emailNotifications ? 1 : 0,
         publicRegistration: data.publicRegistration ? 1 : 0
@@ -564,26 +577,7 @@ export default function Settings() {
                   
                   <div className="space-y-3">
                     <FormLabel>Tempos (Minutos)</FormLabel>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <FormField control={form.control} name="warmupTime" render={({ field }) => (
-                        <FormItem>
-                          <span className="text-xs uppercase text-muted-foreground">Aquecimento</span>
-                          <FormControl>
-                            <Input 
-                              type="number" 
-                              min="0" 
-                              {...field} 
-                              value={field.value ?? ''}
-                              onChange={(e) => field.onChange(e.target.value === '' ? '' : parseInt(e.target.value))}
-                              onBlur={(e) => {
-                                const num = parseInt(e.target.value) || 0;
-                                field.onChange(num < 0 ? 0 : num);
-                              }}
-                            />
-                          </FormControl>
-                          <FormDescription className="text-xs">0 = sem aquecimento</FormDescription>
-                        </FormItem>
-                      )} />
+                    <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
                       <FormField control={form.control} name="gameTime" render={({ field }) => (
                         <FormItem>
                           <span className="text-xs uppercase text-muted-foreground">Jogo</span>
@@ -871,10 +865,10 @@ export default function Settings() {
                 <CardContent>
                   <div className="space-y-2 text-sm text-muted-foreground">
                     <p>
-                      1. Primeiro critério: <span className="font-medium text-foreground">Confronto direto</span>.
+                      Primeiro critério: <span className="font-medium text-foreground">Confronto direto</span>.
                     </p>
                     <p>
-                      2. Segundo critério: <span className="font-medium text-foreground">Diferença entre jogos ganhos e perdidos</span>.
+                      Segundo critério: <span className="font-medium text-foreground">Diferença entre jogos ganhos e perdidos</span>.
                     </p>
                   </div>
                 </CardContent>
@@ -928,6 +922,12 @@ export default function Settings() {
                                   try {
                                     await apiRequest("POST", "/api/settings", {
                                       ...form.getValues(),
+                                      playerProfileOptions: JSON.stringify(
+                                        String(form.getValues().playerProfileOptions ?? "")
+                                          .split("\n")
+                                          .map((opt) => opt.trim())
+                                          .filter(Boolean)
+                                      ),
                                       logo: base64,
                                       whatsappNotifications: form.getValues().whatsappNotifications ? 1 : 0,
                                       emailNotifications: form.getValues().emailNotifications ? 1 : 0,
@@ -988,6 +988,27 @@ export default function Settings() {
                       </div>
                     </div>
                   </div>
+
+                  <FormField
+                    control={form.control}
+                    name="playerProfileOptions"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Checklist de Jogadores</FormLabel>
+                        <FormControl>
+                          <textarea
+                            className="w-full min-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            placeholder={"Academia\nFecha jogos\nNon Stop"}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Uma opção por linha. Exemplo: Academia, Fecha jogos, Non Stop, Participa em torneios sociais.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </CardContent>
               </Card>
             </TabsContent>
@@ -1013,6 +1034,13 @@ export default function Settings() {
                         airHornDuration: settings.airHornDuration ?? 5,
                         soundDurationTarget: settings.soundDurationTarget ?? "air-horn",
                         soundDurationSeconds: settings.soundDurationSeconds ?? settings.airHornDuration ?? 5,
+                        playerProfileOptions: (() => {
+                          try {
+                            const parsed = JSON.parse(settings.playerProfileOptions ?? "[]");
+                            if (Array.isArray(parsed)) return parsed.join("\n");
+                          } catch {}
+                          return "Academia\nFecha jogos\nNon Stop";
+                        })(),
                         startWarmupSound: settings.startWarmupSound,
                         startGameSound: settings.startGameSound,
                         endGameSound: settings.endGameSound,

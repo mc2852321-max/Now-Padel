@@ -249,6 +249,19 @@ export default function Nonstop() {
     return rounds;
   };
 
+  const generatePermutations = (items: number[]): number[][] => {
+    if (items.length <= 1) return [items];
+    const result: number[][] = [];
+    items.forEach((item, index) => {
+      const rest = [...items.slice(0, index), ...items.slice(index + 1)];
+      const restPermutations = generatePermutations(rest);
+      restPermutations.forEach((perm) => {
+        result.push([item, ...perm]);
+      });
+    });
+    return result;
+  };
+
   const rebuildSchedule = async (teamList: Team[]) => {
     await apiRequest("POST", "/api/results/clear");
 
@@ -257,10 +270,38 @@ export default function Nonstop() {
     const rounds = generateRoundRobinRounds(teamList);
     if (!rounds.length) return;
 
+    const courtUsage = new Map<number, number[]>();
+    teamList.forEach((team) => {
+      courtUsage.set(team.id, Array.from({ length: numCourts }, () => 0));
+    });
+
     for (let roundNum = 1; roundNum <= numRounds; roundNum++) {
       const pairings = rounds[(roundNum - 1) % rounds.length];
-      for (let courtNum = 1; courtNum <= numCourts; courtNum++) {
-        const match = pairings[courtNum - 1];
+      if (!pairings.length) continue;
+
+      const availablePairIndices = Array.from({ length: Math.min(numCourts, pairings.length) }, (_, idx) => idx);
+      const permutations = generatePermutations(availablePairIndices);
+      let selectedOrder = availablePairIndices;
+      let bestCost = Number.POSITIVE_INFINITY;
+
+      for (const permutation of permutations) {
+        let cost = 0;
+        for (let courtIndex = 0; courtIndex < permutation.length; courtIndex++) {
+          const match = pairings[permutation[courtIndex]];
+          if (!match) continue;
+          const teamAUsage = courtUsage.get(match.teamAId)?.[courtIndex] ?? 0;
+          const teamBUsage = courtUsage.get(match.teamBId)?.[courtIndex] ?? 0;
+          cost += teamAUsage + teamBUsage;
+        }
+        if (cost < bestCost) {
+          bestCost = cost;
+          selectedOrder = permutation;
+        }
+      }
+
+      for (let courtIndex = 0; courtIndex < selectedOrder.length; courtIndex++) {
+        const courtNum = courtIndex + 1;
+        const match = pairings[selectedOrder[courtIndex]];
         if (!match) continue;
         await apiRequest("POST", "/api/results", {
           round: roundNum,
@@ -270,6 +311,10 @@ export default function Nonstop() {
           scoreA: 0,
           scoreB: 0,
         });
+        const teamAUsage = courtUsage.get(match.teamAId);
+        if (teamAUsage) teamAUsage[courtIndex] += 1;
+        const teamBUsage = courtUsage.get(match.teamBId);
+        if (teamBUsage) teamBUsage[courtIndex] += 1;
       }
     }
   };

@@ -18,6 +18,7 @@ export interface IStorage {
   // Results
   getResults(): Promise<NonstopResult[]>;
   createOrUpdateResult(result: InsertNonstopResult): Promise<NonstopResult>;
+  clearResults(): Promise<void>;
 
   // Settings
   getSettings(): Promise<Settings>;
@@ -117,6 +118,10 @@ export class DatabaseStorage implements IStorage {
       .values(insertResult)
       .returning();
     return created;
+  }
+
+  async clearResults(): Promise<void> {
+    await db.delete(nonstopResults);
   }
 
   async getSettings(): Promise<Settings> {

@@ -305,6 +305,11 @@ export async function registerRoutes(
     res.status(201).json(result);
   });
 
+  app.post("/api/results/clear", isAuthenticated, async (_req, res) => {
+    await storage.clearResults();
+    res.json({ success: true });
+  });
+
   app.get("/api/settings", isAuthenticated, async (_req, res) => {
     const settings = await storage.getSettings();
     res.json(settings);

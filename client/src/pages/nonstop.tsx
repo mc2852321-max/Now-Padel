@@ -215,46 +215,95 @@ export default function Nonstop() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const shuffleTeams = (list: Team[]) => {
+    const copy = [...list];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  };
+
+  const generateRoundRobinRounds = (teamList: Team[]) => {
+    if (teamList.length < 2) return [];
+
+    const initial = shuffleTeams(teamList);
+    const hasBye = initial.length % 2 !== 0;
+    const rotating: (Team | null)[] = hasBye ? [...initial, null] : [...initial];
+    const rounds: Array<Array<{ teamAId: number; teamBId: number }>> = [];
+    const roundsInCycle = rotating.length - 1;
+
+    for (let roundIndex = 0; roundIndex < roundsInCycle; roundIndex++) {
+      const pairings: Array<{ teamAId: number; teamBId: number }> = [];
+
+      for (let i = 0; i < rotating.length / 2; i++) {
+        const teamA = rotating[i];
+        const teamB = rotating[rotating.length - 1 - i];
+        if (!teamA || !teamB) continue;
+        pairings.push({ teamAId: teamA.id, teamBId: teamB.id });
+      }
+
+      rounds.push(pairings);
+
+      // Circle method: first team fixed, remaining rotate.
+      const fixed = rotating[0];
+      const rest = rotating.slice(1);
+      const moved = rest.pop();
+      if (moved !== undefined) {
+        rest.unshift(moved);
+      }
+      rotating.splice(0, rotating.length, fixed, ...rest);
+    }
+
+    return rounds;
+  };
+
+  const rebuildSchedule = async (teamList: Team[]) => {
+    await apiRequest("POST", "/api/results/clear");
+
+    if (teamList.length !== numTeams) return;
+
+    const rounds = generateRoundRobinRounds(teamList);
+    if (!rounds.length) return;
+
+    for (let roundNum = 1; roundNum <= numRounds; roundNum++) {
+      const pairings = rounds[(roundNum - 1) % rounds.length];
+      for (let courtNum = 1; courtNum <= numCourts; courtNum++) {
+        const match = pairings[courtNum - 1];
+        if (!match) continue;
+        await apiRequest("POST", "/api/results", {
+          round: roundNum,
+          court: courtNum,
+          teamAId: match.teamAId,
+          teamBId: match.teamBId,
+          scoreA: 0,
+          scoreB: 0,
+        });
+      }
+    }
+  };
+
   const createTeamMutation = useMutation({
     mutationFn: async (data: any) => {
       const res = await apiRequest("POST", "/api/teams", data);
       return res.json();
     },
-    onSuccess: (newTeam) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
-      toast({ title: "Sucesso", description: "Equipa adicionada" });
-      
+    onSuccess: async (newTeam) => {
       const currentTeams = [...(teams || []), newTeam];
-      const totalRequired = numTeams;
-      
-      // Close dialog when all teams are added
-      if (currentTeams.length >= totalRequired) {
+      if (currentTeams.length >= numTeams) {
         setIsTeamDialogOpen(false);
       }
       
-      if (currentTeams.length === totalRequired) {
-        const shuffled = [...currentTeams].sort(() => Math.random() - 0.5);
-        for (let r = 1; r <= numRounds; r++) {
-          const roundTeams = [...shuffled].sort(() => Math.random() - 0.5);
-          for (let c = 1; c <= numCourts; c++) {
-            const teamAIndex = (c-1)*2;
-            const teamBIndex = (c-1)*2 + 1;
-            const teamA = roundTeams[teamAIndex];
-            const teamB = roundTeams[teamBIndex];
-            if (teamA && teamB && teamA.id && teamB.id) {
-              updateResultMutation.mutate({
-                round: r,
-                court: c,
-                teamAId: teamA.id,
-                teamBId: teamB.id,
-                scoreA: 0,
-                scoreB: 0
-              });
-            }
-          }
-        }
-        toast({ title: "Sorteio Realizado", description: "As equipas foram distribuídas pelas rondas." });
+      if (currentTeams.length === numTeams) {
+        await rebuildSchedule(currentTeams);
+        toast({ title: "Calendario gerado", description: "Emparelhamentos criados sem repeticoes indevidas." });
+      } else if ((results?.length || 0) > 0) {
+        await apiRequest("POST", "/api/results/clear");
       }
+
+      queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/results"] });
+      toast({ title: "Sucesso", description: "Equipa adicionada" });
     }
   });
 
@@ -275,7 +324,9 @@ export default function Nonstop() {
     mutationFn: async (id: number) => {
       await apiRequest("DELETE", `/api/teams/${id}`);
     },
-    onSuccess: () => {
+    onSuccess: async (_data, id) => {
+      const remainingTeams = (teams || []).filter((team) => team.id !== id);
+      await rebuildSchedule(remainingTeams);
       queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
       queryClient.invalidateQueries({ queryKey: ["/api/results"] });
       toast({ title: "Sucesso", description: "Dupla apagada" });

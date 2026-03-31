@@ -578,7 +578,26 @@ export default function Settings() {
                   
                   <div className="space-y-3">
                     <FormLabel>Tempos (Minutos)</FormLabel>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <FormField control={form.control} name="warmupTime" render={({ field }) => (
+                        <FormItem>
+                          <span className="text-xs uppercase text-muted-foreground">Aquecimento</span>
+                          <FormControl>
+                            <Input 
+                              type="number" 
+                              min="0" 
+                              {...field} 
+                              value={field.value ?? ''}
+                              onChange={(e) => field.onChange(e.target.value === '' ? '' : parseInt(e.target.value))}
+                              onBlur={(e) => {
+                                const num = parseInt(e.target.value) || 0;
+                                field.onChange(num < 0 ? 0 : num);
+                              }}
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs">0 = sem aquecimento</FormDescription>
+                        </FormItem>
+                      )} />
                       <FormField control={form.control} name="gameTime" render={({ field }) => (
                         <FormItem>
                           <span className="text-xs uppercase text-muted-foreground">Jogo</span>
@@ -680,7 +699,7 @@ export default function Settings() {
                       render={({ field }) => (
                         <FormItem>
                           <div className="flex items-center justify-between">
-                            <FormLabel>Início do Non Stop (Ronda 1)</FormLabel>
+                            <FormLabel>Início do Aquecimento</FormLabel>
                             <Button 
                               type="button" 
                               variant="ghost" 

@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useState, useEffect } from "react";
 
-type TimerState = 'idle' | 'game' | 'rest';
+type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 
 function getConfiguredDuration(
   soundType: string,
@@ -52,6 +52,7 @@ export default function Nonstop() {
   const numCourts = settings?.nonstopCourts || 3;
   const numTeams = numCourts * 2;
   const numRounds = settings?.nonstopRounds || 5;
+  const warmupMinutes = settings?.warmupTime ?? 0;
   const gameMinutes = settings?.gameTime ?? 20;
   const restMinutes = settings?.restTime ?? 2;
   const totalRounds = settings?.nonstopRounds ?? 5;
@@ -154,7 +155,12 @@ export default function Nonstop() {
         setTimeLeft((prev) => prev - 1);
       }, 1000);
     } else if (isActive && timeLeft === 0) {
-      if (timerState === 'game') {
+      if (timerState === 'warmup') {
+        // Warmup -> Game 1
+        setTimerState('game');
+        setTimeLeft(gameMinutes * 60);
+        playSound('start-game');
+      } else if (timerState === 'game') {
         if (round < totalRounds) {
           // Game X -> Rest
           playSound('end-game');
@@ -185,19 +191,18 @@ export default function Nonstop() {
     return () => clearInterval(interval);
   }, [isActive, timeLeft, timerState, round, gameMinutes, restMinutes, totalRounds]);
 
-  const startTimer = (state: TimerState) => {
-    setTimerState(state);
-    const minutes = state === 'game' ? gameMinutes : restMinutes;
-    setTimeLeft(minutes * 60);
-    setIsActive(true);
-    
-    if (state === 'game') {
-      setRound(1);
-      // First alert is used as "inicio do Non Stop".
+  const startTimer = () => {
+    setRound(1);
+    if (warmupMinutes > 0) {
+      setTimerState('warmup');
+      setTimeLeft(warmupMinutes * 60);
       playSound('start-warmup');
     } else {
-      playSound('end-game');
+      setTimerState('game');
+      setTimeLeft(gameMinutes * 60);
+      playSound('start-game');
     }
+    setIsActive(true);
   };
 
   const formatTime = (seconds: number) => {
@@ -820,7 +825,13 @@ export default function Nonstop() {
           )}>
             <div className="flex flex-col">
               <span className="text-[10px] uppercase tracking-widest text-orange-500 font-bold">
-                {timerState === 'idle' ? 'Cronometro' : timerState === 'game' ? 'Em Jogo' : 'Descanso'}
+                {timerState === 'idle'
+                  ? 'Cronometro'
+                  : timerState === 'warmup'
+                  ? 'Aquecimento'
+                  : timerState === 'game'
+                  ? 'Em Jogo'
+                  : 'Descanso'}
               </span>
               <span className="text-2xl font-mono text-white leading-none">
                 {formatTime(timeLeft)}
@@ -828,6 +839,23 @@ export default function Nonstop() {
             </div>
 
             <div className="flex items-center gap-1">
+              {timerState === 'warmup' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10"
+                  onClick={() => {
+                    setTimerState('game');
+                    setTimeLeft(gameMinutes * 60);
+                    playSound('start-game');
+                    setIsActive(true);
+                    toast({ title: "Aquecimento Ignorado", description: "Início da ronda 1!" });
+                  }}
+                >
+                  PULAR AQ
+                </Button>
+              )}
+
               {timerState === 'rest' && round < totalRounds && (
                 <Button
                   size="sm"
@@ -852,7 +880,7 @@ export default function Nonstop() {
                     if (timeLeft > 0 && timerState !== 'idle') {
                       setIsActive(true);
                     } else {
-                      startTimer('game');
+                      startTimer();
                     }
                   }}>
                     {timeLeft > 0 && timerState !== 'idle' ? <Play className="h-3 w-3 mr-1" /> : null}

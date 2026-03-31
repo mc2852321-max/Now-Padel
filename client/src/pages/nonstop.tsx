@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useState, useEffect } from "react";
 
-type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
+type TimerState = 'idle' | 'game' | 'rest';
 
 function getConfiguredDuration(
   soundType: string,
@@ -52,7 +52,6 @@ export default function Nonstop() {
   const numCourts = settings?.nonstopCourts || 3;
   const numTeams = numCourts * 2;
   const numRounds = settings?.nonstopRounds || 5;
-  const warmupMinutes = settings?.warmupTime ?? 5;
   const gameMinutes = settings?.gameTime ?? 20;
   const restMinutes = settings?.restTime ?? 2;
   const totalRounds = settings?.nonstopRounds ?? 5;
@@ -155,14 +154,7 @@ export default function Nonstop() {
         setTimeLeft((prev) => prev - 1);
       }, 1000);
     } else if (isActive && timeLeft === 0) {
-      if (timerState === 'warmup') {
-        // Warmup -> Game 1
-        setRound(1);
-        setTimerState('game');
-        setTimeLeft(gameMinutes * 60);
-        playSound('start-game');
-        toast({ title: "Aquecimento Concluído", description: "Início do jogo!" });
-      } else if (timerState === 'game') {
+      if (timerState === 'game') {
         if (round < totalRounds) {
           // Game X -> Rest
           playSound('end-game');
@@ -195,18 +187,17 @@ export default function Nonstop() {
 
   const startTimer = (state: TimerState) => {
     setTimerState(state);
-    const minutes = state === 'warmup' ? warmupMinutes : 
-                    state === 'game' ? gameMinutes : 
-                    restMinutes;
+    const minutes = state === 'game' ? gameMinutes : restMinutes;
     setTimeLeft(minutes * 60);
     setIsActive(true);
     
-    if (state === 'warmup') playSound('start-warmup');
-    else if (state === 'game') {
-      setRound(1); // Reset to round 1 if manually starting a game
-      playSound('start-game');
+    if (state === 'game') {
+      setRound(1);
+      // First alert is used as "inicio do Non Stop".
+      playSound('start-warmup');
+    } else {
+      playSound('end-game');
     }
-    else if (state === 'rest') playSound('end-game');
   };
 
   const formatTime = (seconds: number) => {
@@ -784,7 +775,7 @@ export default function Nonstop() {
           )}>
             <div className="flex flex-col">
               <span className="text-[10px] uppercase tracking-widest text-orange-500 font-bold">
-                {timerState === 'idle' ? 'Cronómetro' : timerState === 'warmup' ? 'Aquecimento' : timerState === 'game' ? 'Em Jogo' : 'Descanso'}
+                {timerState === 'idle' ? 'Cronometro' : timerState === 'game' ? 'Em Jogo' : 'Descanso'}
               </span>
               <span className="text-2xl font-mono text-white leading-none">
                 {formatTime(timeLeft)}
@@ -792,23 +783,6 @@ export default function Nonstop() {
             </div>
 
             <div className="flex items-center gap-1">
-              {timerState === 'warmup' && (
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  className="h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10"
-                  onClick={() => {
-                    setTimerState('game');
-                    setRound(1);
-                    setTimeLeft(gameMinutes * 60);
-                    playSound('start-game');
-                    setIsActive(true);
-                    toast({ title: "Aquecimento Ignorado", description: "Início do jogo imediato!" });
-                  }}
-                >
-                  PULAR AQ
-                </Button>
-              )}
               {timerState === 'rest' && round < totalRounds && (
                 <Button
                   size="sm"
@@ -829,17 +803,11 @@ export default function Nonstop() {
 
               {!isActive ? (
                 <>
-                  <Button size="sm" variant="outline" className="h-8 text-[10px] px-2" onClick={() => startTimer('warmup')}>AQ</Button>
                   <Button size="sm" className="h-8 text-[10px] px-2 bg-orange-600 hover:bg-orange-500" onClick={() => {
                     if (timeLeft > 0 && timerState !== 'idle') {
                       setIsActive(true);
                     } else {
-                      // Se houver tempo de aquecimento configurado, começa pelo aquecimento
-                      if (warmupMinutes > 0) {
-                        startTimer('warmup');
-                      } else {
-                        startTimer('game');
-                      }
+                      startTimer('game');
                     }
                   }}>
                     {timeLeft > 0 && timerState !== 'idle' ? <Play className="h-3 w-3 mr-1" /> : null}

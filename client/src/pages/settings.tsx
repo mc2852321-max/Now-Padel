@@ -685,7 +685,7 @@ export default function Settings() {
                       render={({ field }) => (
                         <FormItem>
                           <div className="flex items-center justify-between">
-                            <FormLabel>Início do Aquecimento</FormLabel>
+                            <FormLabel>Início do Non Stop (Ronda 1)</FormLabel>
                             <Button 
                               type="button" 
                               variant="ghost" 

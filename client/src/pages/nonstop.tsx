@@ -599,7 +599,7 @@ export default function Nonstop() {
         teamBId,
       },
       {
-        onSettled: () => {
+        onSuccess: () => {
           setScoreDrafts((prev) => {
             const next = { ...prev };
             delete next[key];
@@ -618,11 +618,42 @@ export default function Nonstop() {
       const res = await apiRequest("POST", "/api/results", data);
       return res.json();
     },
+    onMutate: async (incoming) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/results"] });
+      const previous = queryClient.getQueryData<NonstopResult[]>(["/api/results"]);
+
+      queryClient.setQueryData<NonstopResult[]>(["/api/results"], (current = []) => {
+        if (!incoming?.teamAId || !incoming?.teamBId) return current;
+        const idx = current.findIndex((r) => r.round === incoming.round && r.court === incoming.court);
+        if (idx === -1) {
+          return [...current, incoming as NonstopResult];
+        }
+        const next = [...current];
+        next[idx] = { ...next[idx], ...incoming } as NonstopResult;
+        return next;
+      });
+
+      return { previous };
+    },
+    onError: (_err, _incoming, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["/api/results"], context.previous);
+      }
+    },
     onSuccess: (data) => {
       if (data) {
-        queryClient.invalidateQueries({ queryKey: ["/api/results"] });
+        queryClient.setQueryData<NonstopResult[]>(["/api/results"], (current = []) => {
+          const idx = current.findIndex((r) => r.round === data.round && r.court === data.court);
+          if (idx === -1) return [...current, data];
+          const next = [...current];
+          next[idx] = data;
+          return next;
+        });
       }
-    }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/results"] });
+    },
   });
 
   const resetMutation = useMutation({
@@ -1003,7 +1034,7 @@ export default function Nonstop() {
             "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[420px]",
             isActive ? "bg-orange-950 border-orange-500" : "bg-slate-900 border-slate-800"
           )}>
-            <div className="flex flex-col">
+            <div className="flex flex-col w-[110px]">
               <span className="text-[10px] uppercase tracking-widest text-orange-500 font-bold">
                 {timerState === 'idle'
                   ? 'Cronometro'
@@ -1013,7 +1044,7 @@ export default function Nonstop() {
                   ? 'Em Jogo'
                   : 'Descanso'}
               </span>
-              <span className="text-2xl font-mono text-white leading-none">
+              <span className="text-2xl font-mono tabular-nums text-white leading-none">
                 {formatTime(timeLeft)}
               </span>
             </div>
@@ -1075,7 +1106,7 @@ export default function Nonstop() {
                   <Button
                     variant="default"
                     size="sm"
-                    className="h-8 w-[130px] px-3 text-[10px] border-orange-500 bg-orange-600 text-white hover:bg-orange-500 justify-center"
+                    className="order-2 h-8 w-[130px] px-3 text-[10px] border-orange-500 bg-orange-600 text-white hover:bg-orange-500 justify-center"
                     onClick={() => {
                     const remaining = phaseEndAtRef.current
                       ? Math.max(0, Math.ceil((phaseEndAtRef.current - Date.now()) / 1000))
@@ -1100,8 +1131,25 @@ export default function Nonstop() {
                       <Button
                         variant="outline"
                         size="icon"
-                        className="h-8 w-8 border-red-500/60 text-red-500 hover:bg-red-500/10"
+                        className="order-1 h-8 w-8 border-red-500/60 text-red-500 hover:bg-red-500/10"
                         title="Parar cronómetro"
+                        onClick={(e) => {
+                          if (!isPresentationMode) return;
+                          e.preventDefault();
+                          const confirmed = window.confirm("Parar cronometro e voltar ao inicio?");
+                          if (!confirmed) return;
+                          setIsActive(false);
+                          setTimerState('idle');
+                          setTimeLeft(0);
+                          phaseEndAtRef.current = null;
+                          syncTimer({
+                            timerState: 'idle',
+                            isActive: false,
+                            round,
+                            timeLeft: 0,
+                            phaseEndsAt: null,
+                          });
+                        }}
                       >
                         <Square className="h-3 w-3" />
                       </Button>

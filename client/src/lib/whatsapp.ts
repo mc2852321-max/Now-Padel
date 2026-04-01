@@ -23,8 +23,16 @@ function stripInvalidSurrogates(value: string) {
   return result;
 }
 
+function stripEmojiAndReplacementChars(value: string) {
+  return value
+    .replace(/\uFFFD/g, "")
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "");
+}
+
 function normalizeWhatsAppMessage(message: string) {
-  return stripInvalidSurrogates(message).normalize("NFC").replace(/\r\n/g, "\n");
+  return stripEmojiAndReplacementChars(stripInvalidSurrogates(message))
+    .normalize("NFC")
+    .replace(/\r\n/g, "\n");
 }
 
 function encodeWhatsAppMessage(message: string) {

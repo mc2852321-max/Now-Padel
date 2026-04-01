@@ -207,7 +207,7 @@ export default function Players() {
     const dayLabel = getDayLabel(gameDate);
     const timeLabel = `${gameHour}:${gameMinute}`;
     const displayLevel = levelFilter !== "all" ? levelFilter : player.level;
-    const message = `Ol\u00E1 \u{1F44B}\nFalta 1 jogador para um jogo do n\u00EDvel ${displayLevel} ${dayLabel} \u00E0s ${timeLabel}.\nConsegues jogar? \u{1F609}`;
+    const message = `Ola\nFalta 1 jogador para um jogo do nivel ${displayLevel} ${dayLabel} as ${timeLabel}.\nConsegues jogar?`;
     
     openWhatsApp(player.phone, message, whatsappWindowRef);
 
@@ -245,7 +245,7 @@ export default function Players() {
     const dayLabel = getDayLabel(gameDate!);
     const timeLabel = `${gameHour}:${gameMinute}`;
     const displayLevel = levelFilter !== "all" ? levelFilter : player.level;
-    const message = `Ol\u00E1 \u{1F44B}\nFalta 1 jogador para um jogo do n\u00EDvel ${displayLevel} ${dayLabel} \u00E0s ${timeLabel}.\nConsegues jogar? \u{1F609}`;
+    const message = `Ola\nFalta 1 jogador para um jogo do nivel ${displayLevel} ${dayLabel} as ${timeLabel}.\nConsegues jogar?`;
     
     openWhatsApp(player.phone, message, whatsappWindowRef);
     whatsappWindowRef.current?.focus();
@@ -374,11 +374,11 @@ export default function Players() {
                 </div>
 
                 <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 text-sm">
-                  <p className="font-semibold mb-2 text-slate-500 uppercase text-[10px]">Pré-visualização:</p>
+                  <p className="font-semibold mb-2 text-slate-500 uppercase text-[10px]">Pre-visualizacao:</p>
                   <div className="whitespace-pre-wrap italic">
-                    Olá 👋{"\n"}
-                    Falta 1 jogador para um jogo do nível {levelFilter !== "all" ? levelFilter : "[Nível]"} {gameDate ? getDayLabel(gameDate) : "[Dia]"} às {gameHour}:{gameMinute}.{"\n"}
-                    Consegues jogar? 😉
+                    Ola{"\n"}
+                    Falta 1 jogador para um jogo do nivel {levelFilter !== "all" ? levelFilter : "[Nivel]"} {gameDate ? getDayLabel(gameDate) : "[Dia]"} as {gameHour}:{gameMinute}.{"\n"}
+                    Consegues jogar?
                   </div>
                 </div>
 

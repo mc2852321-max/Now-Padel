@@ -1064,22 +1064,23 @@ export default function Nonstop() {
       ref={presentationContainerRef}
       className={cn(
         "space-y-8 pb-10",
-        isPresentationMode && "fixed inset-0 z-[80] bg-background overflow-auto p-1 space-y-1 pb-1"
+        isPresentationMode && "fixed inset-0 z-[80] bg-background overflow-auto p-1 space-y-1 pb-1 max-[900px]:p-0.5 max-[900px]:space-y-0.5 max-[900px]:pb-0.5"
       )}
     >
       <div className={cn(
         "flex flex-col md:flex-row md:items-center justify-between gap-4",
-        isPresentationMode && "sticky top-0 z-50 bg-background/95 px-1 py-1 border rounded-md"
+        isPresentationMode && "sticky top-0 z-50 bg-background/95 px-1 py-1 border rounded-md gap-2 max-[900px]:py-0.5 max-[900px]:gap-1"
       )}>
         <h2 className={cn("text-3xl font-bold tracking-tight uppercase", isPresentationMode && "hidden")}>Nonstop {numCourts} Campos</h2>
         
         <div className="flex flex-wrap items-center gap-2">
           <Card className={cn(
             "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[420px]",
+            isPresentationMode && "gap-2 px-3 py-1.5 sm:min-w-[360px] max-[900px]:gap-1.5 max-[900px]:px-2.5 max-[900px]:py-1",
             isActive ? "bg-orange-950 border-orange-500" : "bg-slate-900 border-slate-800"
           )}>
-            <div className="flex flex-col w-[110px]">
-              <span className="text-[10px] uppercase tracking-widest text-orange-500 font-bold">
+            <div className={cn("flex flex-col w-[110px]", isPresentationMode && "w-[96px] max-[900px]:w-[88px]")}>
+              <span className={cn("text-[10px] uppercase tracking-widest text-orange-500 font-bold", isPresentationMode && "text-[9px] tracking-wider max-[900px]:text-[8px]")}>
                 {timerState === 'idle'
                   ? 'Cronometro'
                   : timerState === 'warmup'
@@ -1088,17 +1089,17 @@ export default function Nonstop() {
                   ? 'Em Jogo'
                   : 'Descanso'}
               </span>
-              <span className="text-2xl font-mono tabular-nums text-white leading-none">
+              <span className={cn("text-2xl font-mono tabular-nums text-white leading-none", isPresentationMode && "text-xl max-[900px]:text-lg")}>
                 {formatTime(timeLeft)}
               </span>
             </div>
 
-            <div className="flex items-center justify-end gap-1 min-w-[220px]">
+            <div className={cn("flex items-center justify-end gap-1 min-w-[220px]", isPresentationMode && "min-w-[186px] max-[900px]:min-w-[170px]")}>
               {timerState === 'warmup' && (
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10"
+                  className={cn("h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10", isPresentationMode && "h-7 text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:text-[8px] max-[900px]:px-1")}
                   onClick={() => {
                     beginPhase('game', gameMinutes * 60, 'start-game', true, 1);
                     toast({ title: "Aquecimento Ignorado", description: "Início da ronda 1!" });
@@ -1112,7 +1113,7 @@ export default function Nonstop() {
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10"
+                  className={cn("h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10", isPresentationMode && "h-7 text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:text-[8px] max-[900px]:px-1")}
                   onClick={() => {
                     const nextRound = round + 1;
                     beginPhase('game', gameMinutes * 60, 'start-game', true, nextRound);
@@ -1125,7 +1126,7 @@ export default function Nonstop() {
 
               {!isActive ? (
                 <>
-                  <Button size="sm" className="h-8 w-[130px] text-[10px] px-2 bg-orange-600 hover:bg-orange-500 justify-center" onClick={() => {
+                  <Button size="sm" className={cn("h-8 w-[130px] text-[10px] px-2 bg-orange-600 hover:bg-orange-500 justify-center", isPresentationMode && "h-7 w-[118px] text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:w-[108px] max-[900px]:text-[8px] max-[900px]:px-1")} onClick={() => {
                     if (timeLeft > 0 && timerState !== 'idle') {
                       const nextPhaseEndAt = Date.now() + timeLeft * 1000;
                       phaseEndAtRef.current = nextPhaseEndAt;
@@ -1150,7 +1151,7 @@ export default function Nonstop() {
                   <Button
                     variant="default"
                     size="sm"
-                    className="order-2 h-8 w-[130px] px-3 text-[10px] border-orange-500 bg-orange-600 text-white hover:bg-orange-500 justify-center"
+                    className={cn("order-2 h-8 w-[130px] px-3 text-[10px] border-orange-500 bg-orange-600 text-white hover:bg-orange-500 justify-center", isPresentationMode && "h-7 w-[118px] text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:w-[108px] max-[900px]:text-[8px] max-[900px]:px-1")}
                     onClick={() => {
                     const remaining = phaseEndAtRef.current
                       ? Math.max(0, Math.ceil((phaseEndAtRef.current - Date.now()) / 1000))
@@ -1176,7 +1177,7 @@ export default function Nonstop() {
                       <Button
                         variant="outline"
                         size="icon"
-                        className="order-1 h-8 w-8 border-red-500/60 text-red-500 hover:bg-red-500/10"
+                        className={cn("order-1 h-8 w-8 border-red-500/60 text-red-500 hover:bg-red-500/10", isPresentationMode && "h-7 w-7 max-[900px]:h-6 max-[900px]:w-6")}
                         title="Parar cronómetro"
                         onClick={() => setConfirmStopPresentation(true)}
                       >
@@ -1187,7 +1188,7 @@ export default function Nonstop() {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-8 text-[10px] px-2"
+                          className={cn("h-8 text-[10px] px-2", isPresentationMode && "h-7 text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:text-[8px] max-[900px]:px-1")}
                           onClick={() => setConfirmStopPresentation(false)}
                         >
                           Cancelar
@@ -1195,7 +1196,7 @@ export default function Nonstop() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          className="h-8 text-[10px] px-2"
+                          className={cn("h-8 text-[10px] px-2", isPresentationMode && "h-7 text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:text-[8px] max-[900px]:px-1")}
                           onClick={stopTimer}
                         >
                           Confirmar
@@ -1256,6 +1257,7 @@ export default function Nonstop() {
             size="sm"
             className={cn(
               "h-9 px-3 text-[11px] font-semibold tracking-wide border-2 shadow-sm",
+              isPresentationMode && "h-8 px-2.5 text-[10px] max-[900px]:h-7 max-[900px]:px-2 max-[900px]:text-[9px]",
               isPresentationMode
                 ? "bg-gradient-to-r from-red-600 to-orange-500 border-red-500 text-white hover:from-red-500 hover:to-orange-400"
                 : "border-orange-500 text-orange-600 hover:bg-orange-500/10"
@@ -1411,31 +1413,31 @@ export default function Nonstop() {
       <div className={cn("space-y-2", isPresentationMode && "space-y-1 -mt-2")}>
         <div className={cn("pt-1 2xl:sticky 2xl:top-0 2xl:z-50", isPresentationMode && "pt-0")}>
           <Card className="overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-xl">
-            <CardHeader className={cn("bg-slate-900 text-white py-1.5 px-2.5", isPresentationMode && "py-1 px-2")}>
-              <CardTitle className={cn("text-sm uppercase tracking-widest text-center", isPresentationMode && "text-xs")}>Classificação Geral</CardTitle>
+            <CardHeader className={cn("bg-slate-900 text-white py-1.5 px-2.5", isPresentationMode && "py-0.5 px-2 max-[900px]:py-0")}>
+              <CardTitle className={cn("text-sm uppercase tracking-widest text-center", isPresentationMode && "text-[10px] max-[900px]:text-[9px]")}>Classificação Geral</CardTitle>
             </CardHeader>
-            <CardContent className={cn("p-0 max-h-[30vh] overflow-auto bg-slate-100", isPresentationMode && "max-h-[21vh]")}>
+            <CardContent className={cn("p-0 max-h-[30vh] overflow-auto bg-slate-100", isPresentationMode && "max-h-none overflow-visible")}>
               <Table>
                 <TableHeader className="bg-orange-600 text-white">
-                  <TableRow className={cn("hover:bg-orange-600 h-6", isPresentationMode && "h-5")}>
-                    <TableHead className={cn("h-6 text-white font-bold uppercase text-[10px] leading-none py-0.5 px-2 min-w-[200px]", isPresentationMode && "h-5 text-[9px] py-0 px-1.5")}>Duplas</TableHead>
+                  <TableRow className={cn("hover:bg-orange-600 h-6", isPresentationMode && "h-5 max-[900px]:h-[18px]")}>
+                    <TableHead className={cn("h-6 text-white font-bold uppercase text-[10px] leading-none py-0.5 px-2 min-w-[200px]", isPresentationMode && "h-5 text-[9px] py-0 px-1.5 max-[900px]:text-[8px]")}>Duplas</TableHead>
                     {Array.from({ length: numRounds }).map((_, i) => (
-                      <TableHead key={i} className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 whitespace-nowrap min-w-[64px]", isPresentationMode && "h-5 text-[9px] py-0 min-w-[56px]")}>Ronda {i + 1}</TableHead>
+                      <TableHead key={i} className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 whitespace-nowrap min-w-[64px]", isPresentationMode && "h-5 text-[9px] py-0 min-w-[56px] max-[900px]:text-[8px]")}>Ronda {i + 1}</TableHead>
                     ))}
-                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500", isPresentationMode && "h-5 text-[9px] py-0")}>JG</TableHead>
-                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500", isPresentationMode && "h-5 text-[9px] py-0")}>JP</TableHead>
-                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500", isPresentationMode && "h-5 text-[9px] py-0")}>DIF.</TableHead>
-                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 w-16", isPresentationMode && "h-5 text-[9px] py-0 w-14")}>Pontos</TableHead>
+                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>JG</TableHead>
+                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>JP</TableHead>
+                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>DIF.</TableHead>
+                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 w-16", isPresentationMode && "h-5 text-[9px] py-0 w-14 max-[900px]:text-[8px]")}>Pontos</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {stats.map((s: any) => (
-                    <TableRow key={s.teamId} className={cn("hover:bg-slate-50 h-7", isPresentationMode && "h-6")}>
-                      <TableCell className={cn("font-medium py-1 px-2 text-[11px] leading-tight whitespace-normal break-words", isPresentationMode && "py-0.5 text-[10px]")}>{normalizeTeamName(s.name)}</TableCell>
+                    <TableRow key={s.teamId} className={cn("hover:bg-slate-50 h-7", isPresentationMode && "h-5 max-[900px]:h-[18px]")}>
+                      <TableCell className={cn("font-medium py-1 px-2 text-[11px] leading-tight whitespace-normal break-words", isPresentationMode && "py-0 text-[9px] max-[900px]:text-[8px]")}>{normalizeTeamName(s.name)}</TableCell>
                       {s.sequence.map((char: string, i: number) => (
                         <TableCell key={i} className={cn(
                           "text-center text-[11px] font-bold border-l w-16 py-1",
-                          isPresentationMode && "text-[10px] w-14 py-0.5",
+                          isPresentationMode && "text-[9px] w-14 py-0",
                           char === 'V' ? "bg-green-100 text-green-700" :
                           char === 'D' ? "bg-red-100 text-red-700" : 
                           char === 'E' ? "bg-yellow-100 text-yellow-700" : ""
@@ -1443,10 +1445,10 @@ export default function Nonstop() {
                           {char}
                         </TableCell>
                       ))}
-                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[10px] w-11 py-0.5")}>{s.gamesWon}</TableCell>
-                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[10px] w-11 py-0.5")}>{s.gamesLost}</TableCell>
-                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[10px] w-11 py-0.5")}>{s.gamesWon - s.gamesLost}</TableCell>
-                      <TableCell className={cn("text-center text-[11px] font-bold border-l bg-slate-50 w-16 py-1", isPresentationMode && "text-[10px] w-14 py-0.5")}>{s.points}</TableCell>
+                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesWon}</TableCell>
+                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesLost}</TableCell>
+                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesWon - s.gamesLost}</TableCell>
+                      <TableCell className={cn("text-center text-[11px] font-bold border-l bg-slate-50 w-16 py-1", isPresentationMode && "text-[9px] w-14 py-0")}>{s.points}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1466,12 +1468,12 @@ export default function Nonstop() {
                 <Table>
                   <TableHeader className="bg-slate-100">
                     <TableRow className={cn("hover:bg-slate-100 h-6", isPresentationMode && "h-5")}>
-                      <TableHead className={cn("h-6 w-9 text-center font-bold text-[10px] leading-none px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>CAMPO</TableHead>
-                      <TableHead className={cn("h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>EQUIPA A</TableHead>
-                      <TableHead className={cn("h-6 w-10 text-center font-bold text-[10px] leading-none px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>RES</TableHead>
-                      <TableHead className={cn("h-6 w-6 text-center text-[10px] leading-none text-muted-foreground font-normal py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>vs</TableHead>
-                      <TableHead className={cn("h-6 w-10 text-center font-bold text-[10px] leading-none px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>RES</TableHead>
-                      <TableHead className={cn("h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>EQUIPA B</TableHead>
+                      <TableHead className={cn("h-6 w-9 text-center font-bold text-[10px] leading-none px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>CAMPO</TableHead>
+                      <TableHead className={cn("h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>EQUIPA A</TableHead>
+                      <TableHead className={cn("h-6 w-10 text-center font-bold text-[10px] leading-none px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>RES</TableHead>
+                      <TableHead className={cn("h-6 w-6 text-center text-[10px] leading-none text-muted-foreground font-normal py-0.5", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>vs</TableHead>
+                      <TableHead className={cn("h-6 w-10 text-center font-bold text-[10px] leading-none px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>RES</TableHead>
+                      <TableHead className={cn("h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>EQUIPA B</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1479,14 +1481,14 @@ export default function Nonstop() {
                       const courtNum = cIdx + 1;
                       const matchResult = results?.find(res => res.round === roundNum && res.court === courtNum);
                       return (
-                        <TableRow key={courtNum} className={cn("h-7", isPresentationMode && "h-6")}>
-                          <TableCell className={cn("text-center text-[11px] font-bold bg-slate-50 border-r px-1 py-1", isPresentationMode && "text-[10px] py-0.5")}>{courtNum}</TableCell>
+                        <TableRow key={courtNum} className={cn("h-7", isPresentationMode && "h-6 max-[900px]:h-5")}>
+                          <TableCell className={cn("text-center text-[11px] font-bold bg-slate-50 border-r px-1 py-1", isPresentationMode && "text-[10px] py-0.5 max-[900px]:text-[9px] max-[900px]:py-0")}>{courtNum}</TableCell>
                           <TableCell className={cn("w-[34%] max-w-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Select 
                               value={matchResult?.teamAId?.toString()} 
                               onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamAId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamBId: matchResult?.teamBId ?? 0 })}
                             >
-                              <SelectTrigger className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1")}>
+                              <SelectTrigger className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1498,7 +1500,7 @@ export default function Nonstop() {
                             <Input 
                               type="text"
                               inputMode="numeric"
-                              className={cn("border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7")}
+                              className={cn("border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7 max-[900px]:text-[9px] max-[900px]:h-3.5 max-[900px]:w-6")}
                               value={getScoreValue(roundNum, courtNum, "A", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "A", e.target.value)}
                               onBlur={() => commitScore(roundNum, courtNum, "A", matchResult)}
@@ -1509,12 +1511,12 @@ export default function Nonstop() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className={cn("text-center text-[10px] text-muted-foreground bg-slate-50 border-x py-1", isPresentationMode && "text-[9px] py-0.5")}>vs</TableCell>
+                          <TableCell className={cn("text-center text-[10px] text-muted-foreground bg-slate-50 border-x py-1", isPresentationMode && "text-[9px] py-0.5 max-[900px]:text-[8px] max-[900px]:py-0")}>vs</TableCell>
                           <TableCell className={cn("p-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Input 
                               type="text"
                               inputMode="numeric"
-                              className={cn("border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7")}
+                              className={cn("border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7 max-[900px]:text-[9px] max-[900px]:h-3.5 max-[900px]:w-6")}
                               value={getScoreValue(roundNum, courtNum, "B", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "B", e.target.value)}
                               onBlur={() => commitScore(roundNum, courtNum, "B", matchResult)}
@@ -1530,7 +1532,7 @@ export default function Nonstop() {
                               value={matchResult?.teamBId?.toString()} 
                               onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamBId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamAId: matchResult?.teamAId ?? 0 })}
                             >
-                              <SelectTrigger className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1")}>
+                              <SelectTrigger className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>

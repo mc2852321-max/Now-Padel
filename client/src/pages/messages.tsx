@@ -5,7 +5,18 @@ import { SiWhatsapp } from "react-icons/si";
 import { useRef, useState } from "react";
 import { openWhatsAppGeneral } from "@/lib/whatsapp";
 
-const QUICK_EMOJIS = ["😀", "😉", "👍", "🎾", "🔥", "✅", "⏰", "📣", "💪", "🙏"];
+const QUICK_EMOJIS = [
+  0x1f600,
+  0x1f609,
+  0x1f44d,
+  0x1f3be,
+  0x1f525,
+  0x2705,
+  0x23f0,
+  0x1f4e3,
+  0x1f4aa,
+  0x1f64f,
+].map((codePoint) => String.fromCodePoint(codePoint));
 
 export default function Messages() {
   const [message, setMessage] = useState("");

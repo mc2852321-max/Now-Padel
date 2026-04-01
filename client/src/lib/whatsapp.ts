@@ -23,29 +23,34 @@ function stripInvalidSurrogates(value: string) {
   return result;
 }
 
-function stripEmojiAndReplacementChars(value: string) {
+function stripReplacementChar(value: string) {
+  return value.replace(/\uFFFD/g, "");
+}
+
+function stripEmojiChars(value: string) {
   return value
-    .replace(/\uFFFD/g, "")
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "");
 }
 
-function normalizeWhatsAppMessage(message: string) {
-  return stripEmojiAndReplacementChars(stripInvalidSurrogates(message))
+function normalizeWhatsAppMessage(message: string, stripEmoji = false) {
+  const sanitized = stripReplacementChar(stripInvalidSurrogates(message));
+  const noEmoji = stripEmoji ? stripEmojiChars(sanitized) : sanitized;
+  return noEmoji
     .normalize("NFC")
     .replace(/\r\n/g, "\n");
 }
 
-function encodeWhatsAppMessage(message: string) {
-  return encodeURIComponent(normalizeWhatsAppMessage(message));
+function encodeWhatsAppMessage(message: string, stripEmoji = false) {
+  return encodeURIComponent(normalizeWhatsAppMessage(message, stripEmoji));
 }
 
 export function openWhatsAppGeneral(message: string): Window | null {
-  const encodedMessage = encodeWhatsAppMessage(message);
+  const encodedMessage = encodeWhatsAppMessage(message, true);
   return window.open(`https://wa.me/?text=${encodedMessage}`, "_blank");
 }
 
 export function openWhatsApp(phone: string, message: string, windowRef?: { current: Window | null }): Window | null {
-  const encodedMessage = encodeWhatsAppMessage(message);
+  const encodedMessage = encodeWhatsAppMessage(message, false);
   const cleanPhone = phone.replace(/\D/g, '');
   
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);

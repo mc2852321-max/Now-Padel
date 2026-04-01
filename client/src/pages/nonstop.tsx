@@ -153,14 +153,39 @@ export default function Nonstop() {
 
   useEffect(() => {
     if (!syncedTimer) return;
-    setTimerState(syncedTimer.timerState as TimerState);
-    setIsActive(Boolean(syncedTimer.isActive));
-    setRound(Math.max(1, syncedTimer.round || 1));
-    setTimeLeft(Math.max(0, syncedTimer.timeLeft || 0));
-    phaseEndAtRef.current = syncedTimer.phaseEndsAt
+    const nextTimerState = syncedTimer.timerState as TimerState;
+    const nextIsActive = Boolean(syncedTimer.isActive);
+    const nextRound = Math.max(1, syncedTimer.round || 1);
+    const nextTimeLeft = Math.max(0, syncedTimer.timeLeft || 0);
+    const nextPhaseEndAt = syncedTimer.phaseEndsAt
       ? new Date(syncedTimer.phaseEndsAt).getTime()
       : null;
-  }, [syncedTimer?.updatedAt, syncedTimer?.timeLeft]);
+
+    const samePhase =
+      nextTimerState === timerState &&
+      nextRound === round &&
+      nextIsActive === isActive;
+
+    setTimerState(nextTimerState);
+    setIsActive(nextIsActive);
+    setRound(nextRound);
+
+    setTimeLeft((prev) => {
+      if (!samePhase) return nextTimeLeft;
+      if (nextIsActive) return Math.min(prev, nextTimeLeft);
+      return nextTimeLeft;
+    });
+
+    if (!samePhase) {
+      phaseEndAtRef.current = nextPhaseEndAt;
+    } else if (nextIsActive) {
+      phaseEndAtRef.current = phaseEndAtRef.current
+        ? Math.min(phaseEndAtRef.current, nextPhaseEndAt ?? phaseEndAtRef.current)
+        : nextPhaseEndAt;
+    } else {
+      phaseEndAtRef.current = nextPhaseEndAt;
+    }
+  }, [syncedTimer?.updatedAt, syncedTimer?.timeLeft, timerState, round, isActive]);
 
   const playSound = (type: 'start-warmup' | 'start-game' | 'end-game' | 'final') => {
     let soundType = settings?.startGameSound || 'beep-high';

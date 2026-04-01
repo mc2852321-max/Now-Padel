@@ -1,5 +1,14 @@
+function normalizeWhatsAppMessage(message: string) {
+  return message.normalize("NFC").replace(/\r\n/g, "\n");
+}
+
+export function openWhatsAppGeneral(message: string): Window | null {
+  const encodedMessage = encodeURIComponent(normalizeWhatsAppMessage(message));
+  return window.open(`https://wa.me/?text=${encodedMessage}`, "_blank");
+}
+
 export function openWhatsApp(phone: string, message: string, windowRef?: { current: Window | null }): Window | null {
-  const encodedMessage = encodeURIComponent(message);
+  const encodedMessage = encodeURIComponent(normalizeWhatsAppMessage(message));
   const cleanPhone = phone.replace(/\D/g, '');
   
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);

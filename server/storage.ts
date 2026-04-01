@@ -1,4 +1,4 @@
-import { players, teams, nonstopResults, settings, authorizedUsers, type Player, type InsertPlayer, type UpdatePlayerRequest, type Team, type InsertTeam, type NonstopResult, type InsertNonstopResult, type Settings, type InsertSettings, type AuthorizedUser, type InsertAuthorizedUser } from "../shared/schema.js";
+import { players, teams, nonstopResults, nonstopTimer, settings, authorizedUsers, type Player, type InsertPlayer, type UpdatePlayerRequest, type Team, type InsertTeam, type NonstopResult, type InsertNonstopResult, type NonstopTimer, type InsertNonstopTimer, type Settings, type InsertSettings, type AuthorizedUser, type InsertAuthorizedUser } from "../shared/schema.js";
 import { db } from "./db.js";
 import { eq, and, or, ilike, desc, count } from "drizzle-orm";
 
@@ -32,6 +32,8 @@ export interface IStorage {
   // Settings
   getSettings(): Promise<Settings>;
   updateSettings(settings: Partial<InsertSettings>): Promise<Settings>;
+  getNonstopTimer(): Promise<NonstopTimer>;
+  updateNonstopTimer(timer: Partial<InsertNonstopTimer>): Promise<NonstopTimer>;
   resetNonstop(): Promise<void>;
 
   // Authorized Users
@@ -201,9 +203,32 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  async getNonstopTimer(): Promise<NonstopTimer> {
+    const [existing] = await db.select().from(nonstopTimer);
+    if (!existing) {
+      const [created] = await db.insert(nonstopTimer).values({}).returning();
+      return created;
+    }
+    return existing;
+  }
+
+  async updateNonstopTimer(update: Partial<InsertNonstopTimer>): Promise<NonstopTimer> {
+    const current = await this.getNonstopTimer();
+    const [updated] = await db
+      .update(nonstopTimer)
+      .set({
+        ...update,
+        updatedAt: new Date(),
+      })
+      .where(eq(nonstopTimer.id, current.id))
+      .returning();
+    return updated;
+  }
+
   async resetNonstop(): Promise<void> {
     await db.delete(nonstopResults);
     await db.delete(teams);
+    await db.delete(nonstopTimer);
   }
 
   // Authorized Users

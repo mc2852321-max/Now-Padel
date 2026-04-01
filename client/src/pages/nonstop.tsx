@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Team, NonstopResult, Settings, insertTeamSchema } from "@shared/schema";
+import { Team, NonstopResult, Settings, NonstopTimer, insertTeamSchema } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -10,15 +10,20 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2 } from "lucide-react";
+import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2 } from "lucide-react";
 import * as XLSX from "xlsx-js-style";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
+type SyncedTimer = Omit<NonstopTimer, "isActive" | "phaseEndsAt" | "updatedAt"> & {
+  isActive: boolean;
+  phaseEndsAt: string | null;
+  updatedAt: string;
+};
 
 function getConfiguredDuration(
   soundType: string,
@@ -29,16 +34,31 @@ function getConfiguredDuration(
   return soundType === (settings?.soundDurationTarget || "air-horn") ? configured : null;
 }
 
+function normalizeTeamName(name: string) {
+  return name.replace(/\s+/g, " ").trim();
+}
+
 export default function Nonstop() {
   const { toast } = useToast();
   const { data: settings } = useQuery<Settings>({
     queryKey: ["/api/settings"],
+    refetchInterval: 3000,
+    refetchOnWindowFocus: true,
   });
   const { data: teams } = useQuery<Team[]>({
     queryKey: ["/api/teams"],
+    refetchInterval: 3000,
+    refetchOnWindowFocus: true,
   });
   const { data: results } = useQuery<NonstopResult[]>({
     queryKey: ["/api/results"],
+    refetchInterval: 3000,
+    refetchOnWindowFocus: true,
+  });
+  const { data: syncedTimer } = useQuery<SyncedTimer>({
+    queryKey: ["/api/nonstop/timer"],
+    refetchInterval: 1000,
+    refetchOnWindowFocus: true,
   });
 
   const [timerState, setTimerState] = useState<TimerState>('idle');
@@ -48,6 +68,9 @@ export default function Nonstop() {
   const [isTeamDialogOpen, setIsTeamDialogOpen] = useState(false);
   const [isManageTeamsOpen, setIsManageTeamsOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
+  const [isPresentationMode, setIsPresentationMode] = useState(false);
+  const phaseEndAtRef = useRef<number | null>(null);
+  const presentationContainerRef = useRef<HTMLDivElement | null>(null);
 
   const numCourts = settings?.nonstopCourts || 3;
   const numTeams = numCourts * 2;
@@ -56,6 +79,88 @@ export default function Nonstop() {
   const gameMinutes = settings?.gameTime ?? 20;
   const restMinutes = settings?.restTime ?? 2;
   const totalRounds = settings?.nonstopRounds ?? 5;
+
+  const syncTimerMutation = useMutation({
+    mutationFn: async (payload: {
+      timerState: TimerState;
+      isActive: boolean;
+      round: number;
+      timeLeft: number;
+      phaseEndsAt: number | null;
+    }) => {
+      const res = await apiRequest("POST", "/api/nonstop/timer", {
+        timerState: payload.timerState,
+        isActive: payload.isActive,
+        round: payload.round,
+        timeLeft: payload.timeLeft,
+        phaseEndsAt: payload.phaseEndsAt ? new Date(payload.phaseEndsAt).toISOString() : null,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/nonstop/timer"] });
+    },
+  });
+
+  const syncTimer = (
+    payload: {
+      timerState: TimerState;
+      isActive: boolean;
+      round: number;
+      timeLeft: number;
+      phaseEndsAt: number | null;
+    }
+  ) => {
+    syncTimerMutation.mutate(payload);
+  };
+
+  const enterPresentationMode = async () => {
+    setIsPresentationMode(true);
+    const el = presentationContainerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement === el) return;
+    try {
+      await el.requestFullscreen();
+    } catch {
+      toast({
+        title: "Modo apresentação ativo",
+        description: "Ecrã completo indisponível neste dispositivo, mas o layout compacto foi aplicado.",
+      });
+    }
+  };
+
+  const exitPresentationMode = async () => {
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // ignore and fallback to normal layout
+      }
+    }
+    setIsPresentationMode(false);
+  };
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      const ownsFullscreen = document.fullscreenElement === presentationContainerRef.current;
+      if (!ownsFullscreen && isPresentationMode) {
+        setIsPresentationMode(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, [isPresentationMode]);
+
+  useEffect(() => {
+    if (!syncedTimer) return;
+    setTimerState(syncedTimer.timerState as TimerState);
+    setIsActive(Boolean(syncedTimer.isActive));
+    setRound(Math.max(1, syncedTimer.round || 1));
+    setTimeLeft(Math.max(0, syncedTimer.timeLeft || 0));
+    phaseEndAtRef.current = syncedTimer.phaseEndsAt
+      ? new Date(syncedTimer.phaseEndsAt).getTime()
+      : null;
+  }, [syncedTimer?.updatedAt, syncedTimer?.timeLeft]);
 
   const playSound = (type: 'start-warmup' | 'start-game' | 'end-game' | 'final') => {
     let soundType = settings?.startGameSound || 'beep-high';
@@ -148,61 +253,96 @@ export default function Nonstop() {
     }
   };
 
+  const beginPhase = (
+    nextState: TimerState,
+    durationSeconds: number,
+    sound?: 'start-warmup' | 'start-game' | 'end-game' | 'final',
+    isActiveOverride: boolean = isActive,
+    roundOverride: number = round,
+  ) => {
+    const safeDuration = Math.max(0, Math.floor(durationSeconds));
+    const nextPhaseEndAt = safeDuration > 0 ? Date.now() + safeDuration * 1000 : null;
+    setIsActive(isActiveOverride);
+    setRound(roundOverride);
+    setTimerState(nextState);
+    setTimeLeft(safeDuration);
+    phaseEndAtRef.current = nextPhaseEndAt;
+    syncTimer({
+      timerState: nextState,
+      isActive: isActiveOverride,
+      round: roundOverride,
+      timeLeft: safeDuration,
+      phaseEndsAt: nextPhaseEndAt,
+    });
+    if (sound) playSound(sound);
+  };
+
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isActive && timeLeft > 0) {
-      interval = setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
-      }, 1000);
-    } else if (isActive && timeLeft === 0) {
+    if (!isActive) {
+      phaseEndAtRef.current = null;
+      return;
+    }
+
+    if (timeLeft <= 0) return;
+
+    if (!phaseEndAtRef.current) {
+      phaseEndAtRef.current = Date.now() + timeLeft * 1000;
+    }
+
+    const interval = setInterval(() => {
+      if (!phaseEndAtRef.current) return;
+      const remaining = Math.max(0, Math.ceil((phaseEndAtRef.current - Date.now()) / 1000));
+      setTimeLeft((prev) => (prev === remaining ? prev : remaining));
+    }, 250);
+
+    return () => clearInterval(interval);
+  }, [isActive, timeLeft]);
+
+  useEffect(() => {
+    if (isActive && timeLeft === 0) {
+      phaseEndAtRef.current = null;
       if (timerState === 'warmup') {
         // Warmup -> Game 1
-        setTimerState('game');
-        setTimeLeft(gameMinutes * 60);
-        playSound('start-game');
+        beginPhase('game', gameMinutes * 60, 'start-game', true, 1);
       } else if (timerState === 'game') {
         if (round < totalRounds) {
           // Game X -> Rest
           playSound('end-game');
           if (restMinutes > 0) {
-            setTimerState('rest');
-            setTimeLeft(restMinutes * 60);
+            beginPhase('rest', restMinutes * 60, undefined, true, round);
           } else {
-            setRound((prev) => prev + 1);
-            setTimerState('game');
-            setTimeLeft(gameMinutes * 60);
-            playSound('start-game');
+            const nextRound = round + 1;
+            beginPhase('game', gameMinutes * 60, 'start-game', true, nextRound);
           }
         } else {
           // Final Game -> End
           setIsActive(false);
           setTimerState('idle');
+          setTimeLeft(0);
+          syncTimer({
+            timerState: 'idle',
+            isActive: false,
+            round,
+            timeLeft: 0,
+            phaseEndsAt: null,
+          });
           playSound('final');
           toast({ title: "Non Stop Finalizado", description: "O torneio chegou ao fim!" });
         }
       } else if (timerState === 'rest') {
         // Rest -> Game X+1
-        setRound((prev) => prev + 1);
-        setTimerState('game');
-        setTimeLeft(gameMinutes * 60);
-        playSound('start-game');
+        const nextRound = round + 1;
+        beginPhase('game', gameMinutes * 60, 'start-game', true, nextRound);
       }
     }
-    return () => clearInterval(interval);
   }, [isActive, timeLeft, timerState, round, gameMinutes, restMinutes, totalRounds]);
 
   const startTimer = () => {
-    setRound(1);
     if (warmupMinutes > 0) {
-      setTimerState('warmup');
-      setTimeLeft(warmupMinutes * 60);
-      playSound('start-warmup');
+      beginPhase('warmup', warmupMinutes * 60, 'start-warmup', true, 1);
     } else {
-      setTimerState('game');
-      setTimeLeft(gameMinutes * 60);
-      playSound('start-game');
+      beginPhase('game', gameMinutes * 60, 'start-game', true, 1);
     }
-    setIsActive(true);
   };
 
   const formatTime = (seconds: number) => {
@@ -326,7 +466,10 @@ export default function Nonstop() {
 
   const createTeamMutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/api/teams", data);
+      const res = await apiRequest("POST", "/api/teams", {
+        ...data,
+        name: normalizeTeamName(data.name || ""),
+      });
       return res.json();
     },
     onSuccess: async (newTeam) => {
@@ -350,7 +493,10 @@ export default function Nonstop() {
 
   const updateTeamMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: any }) => {
-      const res = await apiRequest("PATCH", `/api/teams/${id}`, data);
+      const res = await apiRequest("PATCH", `/api/teams/${id}`, {
+        ...data,
+        name: normalizeTeamName(data.name || ""),
+      });
       return res.json();
     },
     onSuccess: () => {
@@ -463,6 +609,7 @@ export default function Nonstop() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
       queryClient.invalidateQueries({ queryKey: ["/api/results"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/nonstop/timer"] });
       toast({ title: "Sucesso", description: "Torneio reiniciado" });
     }
   });
@@ -814,9 +961,18 @@ export default function Nonstop() {
   const stats = getStandings();
 
   return (
-    <div className="space-y-8 pb-10">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h2 className="text-3xl font-bold tracking-tight uppercase">Nonstop {numCourts} Campos</h2>
+    <div
+      ref={presentationContainerRef}
+      className={cn(
+        "space-y-8 pb-10",
+        isPresentationMode && "fixed inset-0 z-[80] bg-background overflow-auto p-2 space-y-2 pb-2"
+      )}
+    >
+      <div className={cn(
+        "flex flex-col md:flex-row md:items-center justify-between gap-4",
+        isPresentationMode && "sticky top-0 z-50 bg-background/95 px-1 py-1 border rounded-md"
+      )}>
+        <h2 className={cn("text-3xl font-bold tracking-tight uppercase", isPresentationMode && "hidden")}>Nonstop {numCourts} Campos</h2>
         
         <div className="flex flex-wrap items-center gap-2">
           <Card className={cn(
@@ -845,10 +1001,7 @@ export default function Nonstop() {
                   variant="outline"
                   className="h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10"
                   onClick={() => {
-                    setTimerState('game');
-                    setTimeLeft(gameMinutes * 60);
-                    playSound('start-game');
-                    setIsActive(true);
+                    beginPhase('game', gameMinutes * 60, 'start-game', true, 1);
                     toast({ title: "Aquecimento Ignorado", description: "Início da ronda 1!" });
                   }}
                 >
@@ -862,11 +1015,8 @@ export default function Nonstop() {
                   variant="outline"
                   className="h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10"
                   onClick={() => {
-                    setRound((prev) => prev + 1);
-                    setTimerState('game');
-                    setTimeLeft(gameMinutes * 60);
-                    playSound('start-game');
-                    setIsActive(true);
+                    const nextRound = round + 1;
+                    beginPhase('game', gameMinutes * 60, 'start-game', true, nextRound);
                     toast({ title: "Descanso Ignorado", description: "Início da próxima ronda!" });
                   }}
                 >
@@ -878,7 +1028,16 @@ export default function Nonstop() {
                 <>
                   <Button size="sm" className="h-8 text-[10px] px-2 bg-orange-600 hover:bg-orange-500" onClick={() => {
                     if (timeLeft > 0 && timerState !== 'idle') {
+                      const nextPhaseEndAt = Date.now() + timeLeft * 1000;
+                      phaseEndAtRef.current = nextPhaseEndAt;
                       setIsActive(true);
+                      syncTimer({
+                        timerState,
+                        isActive: true,
+                        round,
+                        timeLeft,
+                        phaseEndsAt: nextPhaseEndAt,
+                      });
                     } else {
                       startTimer();
                     }
@@ -889,35 +1048,121 @@ export default function Nonstop() {
                 </>
               ) : (
                 <>
-                  <Button variant="outline" size="icon" className="h-8 w-8 text-orange-500 border-orange-500/50" onClick={() => setIsActive(false)}>
-                    <Pause className="h-3 w-3" />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-3 text-[10px] text-orange-500 border-orange-500/50 hover:bg-orange-500/10"
+                    onClick={() => {
+                    const remaining = phaseEndAtRef.current
+                      ? Math.max(0, Math.ceil((phaseEndAtRef.current - Date.now()) / 1000))
+                      : timeLeft;
+                    phaseEndAtRef.current = null;
+                    setTimeLeft(remaining);
+                    setIsActive(false);
+                    syncTimer({
+                      timerState,
+                      isActive: false,
+                      round,
+                      timeLeft: remaining,
+                      phaseEndsAt: null,
+                    });
+                  }}
+                  >
+                    <Pause className="h-3 w-3 mr-1" />
+                    PAUSAR
                   </Button>
-                  <Button variant="destructive" size="icon" className="h-8 w-8" onClick={() => { setIsActive(false); setTimerState('idle'); setTimeLeft(0); }}>
-                    <Square className="h-3 w-3" />
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        className="h-8 w-8"
+                        title="Parar cronómetro"
+                      >
+                        <Square className="h-3 w-3" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Parar cronómetro?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Esta ação vai interromper a ronda atual e colocar o cronómetro em estado inicial.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          onClick={() => {
+                            setIsActive(false);
+                            setTimerState('idle');
+                            setTimeLeft(0);
+                            phaseEndAtRef.current = null;
+                            syncTimer({
+                              timerState: 'idle',
+                              isActive: false,
+                              round,
+                              timeLeft: 0,
+                              phaseEndsAt: null,
+                            });
+                          }}
+                        >
+                          Parar
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </>
               )}
 
               <Link href="/settings">
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400" data-testid="button-open-settings">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn("h-8 w-8 text-slate-400", isPresentationMode && "hidden")}
+                  data-testid="button-open-settings"
+                >
                   <SettingsIcon className="h-4 w-4" />
                 </Button>
               </Link>
             </div>
           </Card>
 
-          <Button 
-            variant="outline" 
-            size="icon" 
-            onClick={exportToExcel}
-            disabled={!teams?.length || !results?.some(r => r.scoreA !== null && r.scoreB !== null && (r.scoreA > 0 || r.scoreB > 0))}
-            title={!results?.some(r => r.scoreA !== null && r.scoreB !== null && (r.scoreA > 0 || r.scoreB > 0)) ? "Sem resultados para exportar" : "Exportar Excel"}
-            data-testid="button-export-excel"
+          <Button
+            variant={isPresentationMode ? "default" : "outline"}
+            size="sm"
+            className={cn(
+              "h-8 text-[10px] px-2.5",
+              isPresentationMode && "bg-orange-600 text-white hover:bg-orange-500"
+            )}
+            onClick={() => {
+              if (isPresentationMode) {
+                void exitPresentationMode();
+              } else {
+                void enterPresentationMode();
+              }
+            }}
+            title={isPresentationMode ? "Sair do modo apresentação" : "Entrar em modo apresentação"}
           >
-            <Download className="w-4 h-4" />
+            {isPresentationMode ? <Minimize2 className="w-3.5 h-3.5 mr-1" /> : <Maximize2 className="w-3.5 h-3.5 mr-1" />}
+            {isPresentationMode ? "SAIR APRESENTAÇÃO" : "MODO APRESENTAÇÃO"}
           </Button>
 
-          <AlertDialog>
+          <div className={cn(isPresentationMode && "hidden")}>
+            <Button 
+              variant="outline" 
+              size="icon" 
+              onClick={exportToExcel}
+              disabled={!teams?.length || !results?.some(r => r.scoreA !== null && r.scoreB !== null && (r.scoreA > 0 || r.scoreB > 0))}
+              title={!results?.some(r => r.scoreA !== null && r.scoreB !== null && (r.scoreA > 0 || r.scoreB > 0)) ? "Sem resultados para exportar" : "Exportar Excel"}
+              data-testid="button-export-excel"
+            >
+              <Download className="w-4 h-4" />
+            </Button>
+          </div>
+
+          <div className={cn(isPresentationMode && "hidden")}>
+            <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="outline" size="icon" className="text-destructive hover:bg-destructive/10">
                 <Trash2 className="w-4 h-4" />
@@ -933,9 +1178,11 @@ export default function Nonstop() {
                 <AlertDialogAction onClick={() => resetMutation.mutate()} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Confirmar</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
-          </AlertDialog>
+            </AlertDialog>
+          </div>
 
-          <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
+          <div className={cn(isPresentationMode && "hidden")}>
+            <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
             <DialogTrigger asChild>
               <Button className="gap-2 bg-orange-600 text-white hover:bg-orange-500" disabled={(teams?.length || 0) >= numTeams}>
                 <Plus className="w-4 h-4" /> Adicionar dupla
@@ -945,9 +1192,11 @@ export default function Nonstop() {
               <DialogHeader><DialogTitle>Adicionar dupla</DialogTitle></DialogHeader>
               <TeamForm onSubmit={(data) => createTeamMutation.mutate(data)} key={teams?.length || 0} />
             </DialogContent>
-          </Dialog>
+            </Dialog>
+          </div>
 
-          <Dialog open={isManageTeamsOpen} onOpenChange={setIsManageTeamsOpen}>
+          <div className={cn(isPresentationMode && "hidden")}>
+            <Dialog open={isManageTeamsOpen} onOpenChange={setIsManageTeamsOpen}>
             <DialogTrigger asChild>
               <Button className="gap-2 bg-orange-600 text-white hover:bg-orange-500">
                 <Edit2 className="w-4 h-4" /> Gerir duplas
@@ -1023,37 +1272,38 @@ export default function Nonstop() {
                 </Table>
               </div>
             </DialogContent>
-          </Dialog>
+            </Dialog>
+          </div>
         </div>
       </div>
 
-      <div className="space-y-4">
-        <div className="sticky top-0 z-50 pt-1">
+      <div className="space-y-2">
+        <div className="pt-1 2xl:sticky 2xl:top-0 2xl:z-50">
           <Card className="overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-xl">
-            <CardHeader className="bg-slate-900 text-white py-2 px-3">
+            <CardHeader className="bg-slate-900 text-white py-1.5 px-2.5">
               <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
             </CardHeader>
-            <CardContent className="p-0 max-h-[46vh] overflow-auto bg-slate-100">
+            <CardContent className="p-0 max-h-[30vh] overflow-auto bg-slate-100">
               <Table>
                 <TableHeader className="bg-orange-600 text-white">
-                  <TableRow className="hover:bg-orange-600 h-8">
-                    <TableHead className="text-white font-bold uppercase text-[11px] py-1.5 px-3 min-w-[220px]">Duplas</TableHead>
+                  <TableRow className="hover:bg-orange-600 h-7">
+                    <TableHead className="text-white font-bold uppercase text-[10px] py-1 px-2 min-w-[200px]">Duplas</TableHead>
                     {Array.from({ length: numRounds }).map((_, i) => (
-                      <TableHead key={i} className="text-white font-bold text-center text-[11px] py-1.5 border-l border-orange-500">Ronda {i + 1}</TableHead>
+                      <TableHead key={i} className="text-white font-bold text-center text-[10px] py-1 border-l border-orange-500">Ronda {i + 1}</TableHead>
                     ))}
-                    <TableHead className="text-white font-bold text-center text-[11px] py-1.5 border-l border-orange-500">JG</TableHead>
-                    <TableHead className="text-white font-bold text-center text-[11px] py-1.5 border-l border-orange-500">JP</TableHead>
-                    <TableHead className="text-white font-bold text-center text-[11px] py-1.5 border-l border-orange-500">DIF.</TableHead>
-                    <TableHead className="text-white font-bold text-center text-[11px] py-1.5 border-l border-orange-500 w-20">Pontos</TableHead>
+                    <TableHead className="text-white font-bold text-center text-[10px] py-1 border-l border-orange-500">JG</TableHead>
+                    <TableHead className="text-white font-bold text-center text-[10px] py-1 border-l border-orange-500">JP</TableHead>
+                    <TableHead className="text-white font-bold text-center text-[10px] py-1 border-l border-orange-500">DIF.</TableHead>
+                    <TableHead className="text-white font-bold text-center text-[10px] py-1 border-l border-orange-500 w-16">Pontos</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {stats.map((s: any) => (
-                    <TableRow key={s.teamId} className="hover:bg-slate-50 h-8">
-                      <TableCell className="font-medium py-1.5 px-3 text-xs leading-tight">{s.name}</TableCell>
+                    <TableRow key={s.teamId} className="hover:bg-slate-50 h-7">
+                      <TableCell className="font-medium py-1 px-2 text-[11px] leading-tight whitespace-normal break-words">{normalizeTeamName(s.name)}</TableCell>
                       {s.sequence.map((char: string, i: number) => (
                         <TableCell key={i} className={cn(
-                          "text-center text-xs font-bold border-l w-20 py-1.5",
+                          "text-center text-[11px] font-bold border-l w-16 py-1",
                           char === 'V' ? "bg-green-100 text-green-700" :
                           char === 'D' ? "bg-red-100 text-red-700" : 
                           char === 'E' ? "bg-yellow-100 text-yellow-700" : ""
@@ -1061,10 +1311,10 @@ export default function Nonstop() {
                           {char}
                         </TableCell>
                       ))}
-                      <TableCell className="text-center text-xs border-l w-14 py-1.5">{s.gamesWon}</TableCell>
-                      <TableCell className="text-center text-xs border-l w-14 py-1.5">{s.gamesLost}</TableCell>
-                      <TableCell className="text-center text-xs border-l w-14 py-1.5">{s.gamesWon - s.gamesLost}</TableCell>
-                      <TableCell className="text-center text-xs font-bold border-l bg-slate-50 w-20 py-1.5">{s.points}</TableCell>
+                      <TableCell className="text-center text-[11px] border-l w-12 py-1">{s.gamesWon}</TableCell>
+                      <TableCell className="text-center text-[11px] border-l w-12 py-1">{s.gamesLost}</TableCell>
+                      <TableCell className="text-center text-[11px] border-l w-12 py-1">{s.gamesWon - s.gamesLost}</TableCell>
+                      <TableCell className="text-center text-[11px] font-bold border-l bg-slate-50 w-16 py-1">{s.points}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1072,24 +1322,24 @@ export default function Nonstop() {
             </CardContent>
           </Card>
         </div>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
         {Array.from({ length: numRounds }).map((_, rIdx) => {
           const roundNum = rIdx + 1;
           return (
             <Card key={roundNum} className="overflow-hidden border-2 border-orange-600">
-              <CardHeader className="bg-orange-600 text-white py-2 text-center">
-                <CardTitle className="text-xs uppercase tracking-widest">Ronda {roundNum}</CardTitle>
+              <CardHeader className="bg-orange-600 text-white py-1 text-center">
+                <CardTitle className="text-[10px] uppercase tracking-widest">Ronda {roundNum}</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
                   <TableHeader className="bg-slate-100">
-                    <TableRow className="hover:bg-slate-100 h-8">
-                      <TableHead className="w-12 text-center font-bold text-[11px] px-2 py-1.5">CAMPO</TableHead>
-                      <TableHead className="font-bold text-[11px] w-[34%] px-2 py-1.5">EQUIPA A</TableHead>
-                      <TableHead className="w-16 text-center font-bold text-[11px] px-2 py-1.5">RESULTADO</TableHead>
-                      <TableHead className="w-8 text-center text-[11px] text-muted-foreground font-normal py-1.5">vs</TableHead>
-                      <TableHead className="w-16 text-center font-bold text-[11px] px-2 py-1.5">RESULTADO</TableHead>
-                      <TableHead className="font-bold text-[11px] w-[34%] px-2 py-1.5">EQUIPA B</TableHead>
+                    <TableRow className="hover:bg-slate-100 h-7">
+                      <TableHead className="w-9 text-center font-bold text-[10px] px-1 py-1">CAMPO</TableHead>
+                      <TableHead className="font-bold text-[10px] w-[34%] px-1 py-1">EQUIPA A</TableHead>
+                      <TableHead className="w-10 text-center font-bold text-[10px] px-1 py-1">RES</TableHead>
+                      <TableHead className="w-6 text-center text-[10px] text-muted-foreground font-normal py-1">vs</TableHead>
+                      <TableHead className="w-10 text-center font-bold text-[10px] px-1 py-1">RES</TableHead>
+                      <TableHead className="font-bold text-[10px] w-[34%] px-1 py-1">EQUIPA B</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1097,18 +1347,18 @@ export default function Nonstop() {
                       const courtNum = cIdx + 1;
                       const matchResult = results?.find(res => res.round === roundNum && res.court === courtNum);
                       return (
-                        <TableRow key={courtNum} className="h-9">
-                          <TableCell className="text-center text-xs font-bold bg-slate-50 border-r px-2 py-1.5">{courtNum}</TableCell>
-                          <TableCell className="w-[34%] px-1 py-1">
+                        <TableRow key={courtNum} className="h-7">
+                          <TableCell className="text-center text-[11px] font-bold bg-slate-50 border-r px-1 py-1">{courtNum}</TableCell>
+                          <TableCell className="w-[34%] max-w-0 px-1 py-1">
                             <Select 
                               value={matchResult?.teamAId?.toString()} 
                               onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamAId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamBId: matchResult?.teamBId ?? 0 })}
                             >
-                              <SelectTrigger className="border-none shadow-none focus:ring-0 h-7 text-[11px] px-2 min-w-[130px]">
-                                <SelectValue placeholder="Selecionar Equipa" />
+                              <SelectTrigger className="w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5">
+                                <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
-                                {teams?.map(t => <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>)}
+                                {teams?.map(t => <SelectItem key={t.id} value={t.id.toString()}>{normalizeTeamName(t.name)}</SelectItem>)}
                               </SelectContent>
                             </Select>
                           </TableCell>
@@ -1116,7 +1366,7 @@ export default function Nonstop() {
                             <Input 
                               type="text"
                               inputMode="numeric"
-                              className="border-none text-center text-xs font-bold focus-visible:ring-0 h-6 w-10 mx-auto px-0"
+                              className="border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0"
                               value={getScoreValue(roundNum, courtNum, "A", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "A", e.target.value)}
                               onBlur={() => commitScore(roundNum, courtNum, "A", matchResult)}
@@ -1127,12 +1377,12 @@ export default function Nonstop() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="text-center text-[11px] text-muted-foreground bg-slate-50 border-x py-1.5">vs</TableCell>
+                          <TableCell className="text-center text-[10px] text-muted-foreground bg-slate-50 border-x py-1">vs</TableCell>
                           <TableCell className="p-0 px-1 py-1">
                             <Input 
                               type="text"
                               inputMode="numeric"
-                              className="border-none text-center text-xs font-bold focus-visible:ring-0 h-6 w-10 mx-auto px-0"
+                              className="border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0"
                               value={getScoreValue(roundNum, courtNum, "B", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "B", e.target.value)}
                               onBlur={() => commitScore(roundNum, courtNum, "B", matchResult)}
@@ -1143,16 +1393,16 @@ export default function Nonstop() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="w-[34%] px-1 py-1">
+                          <TableCell className="w-[34%] max-w-0 px-1 py-1">
                             <Select 
                               value={matchResult?.teamBId?.toString()} 
                               onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamBId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamAId: matchResult?.teamAId ?? 0 })}
                             >
-                              <SelectTrigger className="border-none shadow-none focus:ring-0 h-7 text-[11px] px-2 min-w-[130px]">
-                                <SelectValue placeholder="Selecionar Equipa" />
+                              <SelectTrigger className="w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5">
+                                <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
-                                {teams?.map(t => <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>)}
+                                {teams?.map(t => <SelectItem key={t.id} value={t.id.toString()}>{normalizeTeamName(t.name)}</SelectItem>)}
                               </SelectContent>
                             </Select>
                           </TableCell>

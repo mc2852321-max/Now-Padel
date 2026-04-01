@@ -3,13 +3,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { SiWhatsapp } from "react-icons/si";
 import { useState } from "react";
+import { openWhatsAppGeneral } from "@/lib/whatsapp";
 
 export default function Messages() {
   const [message, setMessage] = useState("");
 
   const handleSend = () => {
-    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank');
+    openWhatsAppGeneral(message);
   };
 
   return (

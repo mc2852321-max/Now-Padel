@@ -32,6 +32,14 @@ const isAuthenticated: RequestHandler = (req, res, next) => {
   }
 };
 
+const timerSyncSchema = z.object({
+  timerState: z.enum(["idle", "warmup", "game", "rest"]).optional(),
+  isActive: z.boolean().optional(),
+  round: z.number().int().min(1).optional(),
+  timeLeft: z.number().int().min(0).optional(),
+  phaseEndsAt: z.string().datetime().nullable().optional(),
+});
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -323,6 +331,54 @@ export async function registerRoutes(
     res.json(settings);
   });
 
+  app.get("/api/nonstop/timer", isAuthenticated, async (_req, res) => {
+    const timer = await storage.getNonstopTimer();
+    let liveTimeLeft = timer.timeLeft;
+
+    if (timer.isActive && timer.phaseEndsAt) {
+      liveTimeLeft = Math.max(
+        0,
+        Math.ceil((new Date(timer.phaseEndsAt).getTime() - Date.now()) / 1000),
+      );
+    }
+
+    res.json({
+      ...timer,
+      isActive: Boolean(timer.isActive),
+      timeLeft: liveTimeLeft,
+    });
+  });
+
+  app.post("/api/nonstop/timer", isAuthenticated, async (req, res) => {
+    try {
+      const input = timerSyncSchema.parse(req.body);
+      const updated = await storage.updateNonstopTimer({
+        timerState: input.timerState,
+        isActive: input.isActive === undefined ? undefined : (input.isActive ? 1 : 0),
+        round: input.round,
+        timeLeft: input.timeLeft,
+        phaseEndsAt: input.phaseEndsAt === undefined
+          ? undefined
+          : input.phaseEndsAt === null
+            ? null
+            : new Date(input.phaseEndsAt),
+      });
+
+      res.json({
+        ...updated,
+        isActive: Boolean(updated.isActive),
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join("."),
+        });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.post("/api/nonstop/reset", isAuthenticated, async (_req, res) => {
     await storage.resetNonstop();
     res.json({ success: true });
@@ -520,6 +576,48 @@ export async function registerRoutes(
         court INTEGER NOT NULL DEFAULT 1,
         played_at TIMESTAMP DEFAULT NOW()
       )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS nonstop_timer (
+        id SERIAL PRIMARY KEY,
+        timer_state TEXT NOT NULL DEFAULT 'idle',
+        is_active INTEGER NOT NULL DEFAULT 0,
+        round INTEGER NOT NULL DEFAULT 1,
+        time_left INTEGER NOT NULL DEFAULT 0,
+        phase_ends_at TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE nonstop_timer
+      ADD COLUMN IF NOT EXISTS timer_state TEXT NOT NULL DEFAULT 'idle'
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE nonstop_timer
+      ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 0
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE nonstop_timer
+      ADD COLUMN IF NOT EXISTS round INTEGER NOT NULL DEFAULT 1
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE nonstop_timer
+      ADD COLUMN IF NOT EXISTS time_left INTEGER NOT NULL DEFAULT 0
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE nonstop_timer
+      ADD COLUMN IF NOT EXISTS phase_ends_at TIMESTAMP
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE nonstop_timer
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     `);
 
     await db.execute(sql`

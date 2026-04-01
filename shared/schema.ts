@@ -27,6 +27,16 @@ export const nonstopResults = pgTable("nonstop_results", {
   playedAt: timestamp("played_at").defaultNow(),
 });
 
+export const nonstopTimer = pgTable("nonstop_timer", {
+  id: serial("id").primaryKey(),
+  timerState: text("timer_state").notNull().default("idle"),
+  isActive: integer("is_active").notNull().default(0),
+  round: integer("round").notNull().default(1),
+  timeLeft: integer("time_left").notNull().default(0),
+  phaseEndsAt: timestamp("phase_ends_at"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const settings = pgTable("settings", {
   id: serial("id").primaryKey(),
   clubName: text("club_name").notNull().default("Now Padel & Fit"),
@@ -71,6 +81,9 @@ export type Team = typeof teams.$inferSelect;
 export type InsertTeam = z.infer<typeof insertTeamSchema>;
 export type NonstopResult = typeof nonstopResults.$inferSelect;
 export type InsertNonstopResult = z.infer<typeof insertNonstopResultSchema>;
+export type NonstopTimer = typeof nonstopTimer.$inferSelect;
+export const insertNonstopTimerSchema = createInsertSchema(nonstopTimer).omit({ id: true, updatedAt: true });
+export type InsertNonstopTimer = z.infer<typeof insertNonstopTimerSchema>;
 
 export type Settings = typeof settings.$inferSelect;
 export const insertSettingsSchema = createInsertSchema(settings).omit({ id: true });

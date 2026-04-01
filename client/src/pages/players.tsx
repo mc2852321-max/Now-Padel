@@ -207,7 +207,7 @@ export default function Players() {
     const dayLabel = getDayLabel(gameDate);
     const timeLabel = `${gameHour}:${gameMinute}`;
     const displayLevel = levelFilter !== "all" ? levelFilter : player.level;
-    const message = `Olá 👋\nFalta 1 jogador para um jogo do nível ${displayLevel} ${dayLabel} às ${timeLabel}.\nConsegues jogar? 😉`;
+    const message = `Ol\u00E1 \u{1F44B}\nFalta 1 jogador para um jogo do n\u00EDvel ${displayLevel} ${dayLabel} \u00E0s ${timeLabel}.\nConsegues jogar? \u{1F609}`;
     
     openWhatsApp(player.phone, message, whatsappWindowRef);
 
@@ -245,7 +245,7 @@ export default function Players() {
     const dayLabel = getDayLabel(gameDate!);
     const timeLabel = `${gameHour}:${gameMinute}`;
     const displayLevel = levelFilter !== "all" ? levelFilter : player.level;
-    const message = `Olá 👋\nFalta 1 jogador para um jogo do nível ${displayLevel} ${dayLabel} às ${timeLabel}.\nConsegues jogar? 😉`;
+    const message = `Ol\u00E1 \u{1F44B}\nFalta 1 jogador para um jogo do n\u00EDvel ${displayLevel} ${dayLabel} \u00E0s ${timeLabel}.\nConsegues jogar? \u{1F609}`;
     
     openWhatsApp(player.phone, message, whatsappWindowRef);
     whatsappWindowRef.current?.focus();

@@ -69,8 +69,15 @@ export default function Nonstop() {
   const [isManageTeamsOpen, setIsManageTeamsOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
+  const [confirmStopPresentation, setConfirmStopPresentation] = useState(false);
   const phaseEndAtRef = useRef<number | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
+  const pendingTimerRef = useRef<{
+    timerState: TimerState;
+    isActive: boolean;
+    round: number;
+  } | null>(null);
+  const pendingTimerUntilRef = useRef(0);
 
   const numCourts = settings?.nonstopCourts || 3;
   const numTeams = numCourts * 2;
@@ -108,10 +115,17 @@ export default function Nonstop() {
       phaseEndsAt: number | null;
     }
   ) => {
+    pendingTimerRef.current = {
+      timerState: payload.timerState,
+      isActive: payload.isActive,
+      round: payload.round,
+    };
+    pendingTimerUntilRef.current = Date.now() + 2000;
     syncTimerMutation.mutate(payload);
   };
 
   const enterPresentationMode = async () => {
+    setConfirmStopPresentation(false);
     setIsPresentationMode(true);
     const el = presentationContainerRef.current;
     if (!el) return;
@@ -127,6 +141,7 @@ export default function Nonstop() {
   };
 
   const exitPresentationMode = async () => {
+    setConfirmStopPresentation(false);
     if (document.fullscreenElement) {
       try {
         await document.exitFullscreen();
@@ -141,6 +156,7 @@ export default function Nonstop() {
     const onFullscreenChange = () => {
       const ownsFullscreen = document.fullscreenElement === presentationContainerRef.current;
       if (!ownsFullscreen && isPresentationMode) {
+        setConfirmStopPresentation(false);
         setIsPresentationMode(false);
       }
     };
@@ -160,6 +176,19 @@ export default function Nonstop() {
       nextIsActive && nextPhaseEndAt
         ? Math.max(0, Math.ceil((nextPhaseEndAt - Date.now()) / 1000))
         : Math.max(0, syncedTimer.timeLeft || 0);
+
+    const pending = pendingTimerRef.current;
+    if (pending && Date.now() < pendingTimerUntilRef.current) {
+      const matchesPending =
+        pending.timerState === nextTimerState &&
+        pending.isActive === nextIsActive &&
+        pending.round === nextRound;
+      if (!matchesPending) {
+        return;
+      }
+      pendingTimerRef.current = null;
+      pendingTimerUntilRef.current = 0;
+    }
 
     const samePhase =
       nextTimerState === timerState &&
@@ -367,6 +396,21 @@ export default function Nonstop() {
     } else {
       beginPhase('game', gameMinutes * 60, 'start-game', true, 1);
     }
+  };
+
+  const stopTimer = () => {
+    setIsActive(false);
+    setTimerState('idle');
+    setTimeLeft(0);
+    phaseEndAtRef.current = null;
+    setConfirmStopPresentation(false);
+    syncTimer({
+      timerState: 'idle',
+      isActive: false,
+      round,
+      timeLeft: 0,
+      phaseEndsAt: null,
+    });
   };
 
   const formatTime = (seconds: number) => {
@@ -1020,7 +1064,7 @@ export default function Nonstop() {
       ref={presentationContainerRef}
       className={cn(
         "space-y-8 pb-10",
-        isPresentationMode && "fixed inset-0 z-[80] bg-background overflow-auto p-2 space-y-2 pb-2"
+        isPresentationMode && "fixed inset-0 z-[80] bg-background overflow-auto p-1 space-y-1 pb-1"
       )}
     >
       <div className={cn(
@@ -1114,6 +1158,7 @@ export default function Nonstop() {
                     phaseEndAtRef.current = null;
                     setTimeLeft(remaining);
                     setIsActive(false);
+                    setConfirmStopPresentation(false);
                     syncTimer({
                       timerState,
                       isActive: false,
@@ -1126,6 +1171,40 @@ export default function Nonstop() {
                     <Pause className="h-3 w-3 mr-1" />
                     PAUSAR
                   </Button>
+                  {isPresentationMode ? (
+                    !confirmStopPresentation ? (
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="order-1 h-8 w-8 border-red-500/60 text-red-500 hover:bg-red-500/10"
+                        title="Parar cronómetro"
+                        onClick={() => setConfirmStopPresentation(true)}
+                      >
+                        <Square className="h-3 w-3" />
+                      </Button>
+                    ) : (
+                      <div className="order-1 flex items-center gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-[10px] px-2"
+                          onClick={() => setConfirmStopPresentation(false)}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-8 text-[10px] px-2"
+                          onClick={stopTimer}
+                        >
+                          Confirmar
+                        </Button>
+                      </div>
+                    )
+                  ) : null}
+
+                  <div className={cn(isPresentationMode && "hidden")}>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button
@@ -1133,23 +1212,6 @@ export default function Nonstop() {
                         size="icon"
                         className="order-1 h-8 w-8 border-red-500/60 text-red-500 hover:bg-red-500/10"
                         title="Parar cronómetro"
-                        onClick={(e) => {
-                          if (!isPresentationMode) return;
-                          e.preventDefault();
-                          const confirmed = window.confirm("Parar cronometro e voltar ao inicio?");
-                          if (!confirmed) return;
-                          setIsActive(false);
-                          setTimerState('idle');
-                          setTimeLeft(0);
-                          phaseEndAtRef.current = null;
-                          syncTimer({
-                            timerState: 'idle',
-                            isActive: false,
-                            round,
-                            timeLeft: 0,
-                            phaseEndsAt: null,
-                          });
-                        }}
                       >
                         <Square className="h-3 w-3" />
                       </Button>
@@ -1165,25 +1227,14 @@ export default function Nonstop() {
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
                         <AlertDialogAction
                           className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          onClick={() => {
-                            setIsActive(false);
-                            setTimerState('idle');
-                            setTimeLeft(0);
-                            phaseEndAtRef.current = null;
-                            syncTimer({
-                              timerState: 'idle',
-                              isActive: false,
-                              round,
-                              timeLeft: 0,
-                              phaseEndsAt: null,
-                            });
-                          }}
+                          onClick={stopTimer}
                         >
                           Parar
                         </AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
+                  </div>
                 </>
               )}
 
@@ -1204,8 +1255,10 @@ export default function Nonstop() {
             variant={isPresentationMode ? "default" : "outline"}
             size="sm"
             className={cn(
-              "h-8 text-[10px] px-2.5",
-              isPresentationMode && "bg-orange-600 text-white hover:bg-orange-500"
+              "h-9 px-3 text-[11px] font-semibold tracking-wide border-2 shadow-sm",
+              isPresentationMode
+                ? "bg-gradient-to-r from-red-600 to-orange-500 border-red-500 text-white hover:from-red-500 hover:to-orange-400"
+                : "border-orange-500 text-orange-600 hover:bg-orange-500/10"
             )}
             onClick={() => {
               if (isPresentationMode) {
@@ -1218,6 +1271,12 @@ export default function Nonstop() {
           >
             {isPresentationMode ? <Minimize2 className="w-3.5 h-3.5 mr-1" /> : <Maximize2 className="w-3.5 h-3.5 mr-1" />}
             {isPresentationMode ? "SAIR APRESENTAÇÃO" : "MODO APRESENTAÇÃO"}
+            {isPresentationMode ? (
+              <span className="ml-2 inline-flex items-center rounded-full border border-white/40 bg-white/15 px-1.5 py-0.5 text-[9px] font-bold leading-none">
+                <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-red-200 animate-pulse" />
+                AO VIVO
+              </span>
+            ) : null}
           </Button>
 
           <div className={cn(isPresentationMode && "hidden")}>
@@ -1349,33 +1408,34 @@ export default function Nonstop() {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="pt-1 2xl:sticky 2xl:top-0 2xl:z-50">
+      <div className={cn("space-y-2", isPresentationMode && "space-y-1 -mt-2")}>
+        <div className={cn("pt-1 2xl:sticky 2xl:top-0 2xl:z-50", isPresentationMode && "pt-0")}>
           <Card className="overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-xl">
-            <CardHeader className="bg-slate-900 text-white py-1.5 px-2.5">
-              <CardTitle className="text-sm uppercase tracking-widest text-center">Classificação Geral</CardTitle>
+            <CardHeader className={cn("bg-slate-900 text-white py-1.5 px-2.5", isPresentationMode && "py-1 px-2")}>
+              <CardTitle className={cn("text-sm uppercase tracking-widest text-center", isPresentationMode && "text-xs")}>Classificação Geral</CardTitle>
             </CardHeader>
-            <CardContent className="p-0 max-h-[30vh] overflow-auto bg-slate-100">
+            <CardContent className={cn("p-0 max-h-[30vh] overflow-auto bg-slate-100", isPresentationMode && "max-h-[21vh]")}>
               <Table>
                 <TableHeader className="bg-orange-600 text-white">
-                  <TableRow className="hover:bg-orange-600 h-6">
-                    <TableHead className="h-6 text-white font-bold uppercase text-[10px] leading-none py-0.5 px-2 min-w-[200px]">Duplas</TableHead>
+                  <TableRow className={cn("hover:bg-orange-600 h-6", isPresentationMode && "h-5")}>
+                    <TableHead className={cn("h-6 text-white font-bold uppercase text-[10px] leading-none py-0.5 px-2 min-w-[200px]", isPresentationMode && "h-5 text-[9px] py-0 px-1.5")}>Duplas</TableHead>
                     {Array.from({ length: numRounds }).map((_, i) => (
-                      <TableHead key={i} className="h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 whitespace-nowrap min-w-[64px]">Ronda {i + 1}</TableHead>
+                      <TableHead key={i} className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 whitespace-nowrap min-w-[64px]", isPresentationMode && "h-5 text-[9px] py-0 min-w-[56px]")}>Ronda {i + 1}</TableHead>
                     ))}
-                    <TableHead className="h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500">JG</TableHead>
-                    <TableHead className="h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500">JP</TableHead>
-                    <TableHead className="h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500">DIF.</TableHead>
-                    <TableHead className="h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 w-16">Pontos</TableHead>
+                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500", isPresentationMode && "h-5 text-[9px] py-0")}>JG</TableHead>
+                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500", isPresentationMode && "h-5 text-[9px] py-0")}>JP</TableHead>
+                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500", isPresentationMode && "h-5 text-[9px] py-0")}>DIF.</TableHead>
+                    <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 w-16", isPresentationMode && "h-5 text-[9px] py-0 w-14")}>Pontos</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {stats.map((s: any) => (
-                    <TableRow key={s.teamId} className="hover:bg-slate-50 h-7">
-                      <TableCell className="font-medium py-1 px-2 text-[11px] leading-tight whitespace-normal break-words">{normalizeTeamName(s.name)}</TableCell>
+                    <TableRow key={s.teamId} className={cn("hover:bg-slate-50 h-7", isPresentationMode && "h-6")}>
+                      <TableCell className={cn("font-medium py-1 px-2 text-[11px] leading-tight whitespace-normal break-words", isPresentationMode && "py-0.5 text-[10px]")}>{normalizeTeamName(s.name)}</TableCell>
                       {s.sequence.map((char: string, i: number) => (
                         <TableCell key={i} className={cn(
                           "text-center text-[11px] font-bold border-l w-16 py-1",
+                          isPresentationMode && "text-[10px] w-14 py-0.5",
                           char === 'V' ? "bg-green-100 text-green-700" :
                           char === 'D' ? "bg-red-100 text-red-700" : 
                           char === 'E' ? "bg-yellow-100 text-yellow-700" : ""
@@ -1383,10 +1443,10 @@ export default function Nonstop() {
                           {char}
                         </TableCell>
                       ))}
-                      <TableCell className="text-center text-[11px] border-l w-12 py-1">{s.gamesWon}</TableCell>
-                      <TableCell className="text-center text-[11px] border-l w-12 py-1">{s.gamesLost}</TableCell>
-                      <TableCell className="text-center text-[11px] border-l w-12 py-1">{s.gamesWon - s.gamesLost}</TableCell>
-                      <TableCell className="text-center text-[11px] font-bold border-l bg-slate-50 w-16 py-1">{s.points}</TableCell>
+                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[10px] w-11 py-0.5")}>{s.gamesWon}</TableCell>
+                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[10px] w-11 py-0.5")}>{s.gamesLost}</TableCell>
+                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[10px] w-11 py-0.5")}>{s.gamesWon - s.gamesLost}</TableCell>
+                      <TableCell className={cn("text-center text-[11px] font-bold border-l bg-slate-50 w-16 py-1", isPresentationMode && "text-[10px] w-14 py-0.5")}>{s.points}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1394,24 +1454,24 @@ export default function Nonstop() {
             </CardContent>
           </Card>
         </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+      <div className={cn("grid grid-cols-1 lg:grid-cols-2 gap-2", isPresentationMode && "xl:grid-cols-3 gap-1")}>
         {Array.from({ length: numRounds }).map((_, rIdx) => {
           const roundNum = rIdx + 1;
           return (
             <Card key={roundNum} className="overflow-hidden border-2 border-orange-600">
-              <CardHeader className="bg-orange-600 text-white py-1 text-center">
-                <CardTitle className="text-[10px] uppercase tracking-widest">Ronda {roundNum}</CardTitle>
+              <CardHeader className={cn("bg-orange-600 text-white py-1 text-center", isPresentationMode && "py-0.5")}>
+                <CardTitle className={cn("text-[10px] uppercase tracking-widest", isPresentationMode && "text-[9px]")}>Ronda {roundNum}</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
                   <TableHeader className="bg-slate-100">
-                    <TableRow className="hover:bg-slate-100 h-6">
-                      <TableHead className="h-6 w-9 text-center font-bold text-[10px] leading-none px-1 py-0.5">CAMPO</TableHead>
-                      <TableHead className="h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5">EQUIPA A</TableHead>
-                      <TableHead className="h-6 w-10 text-center font-bold text-[10px] leading-none px-1 py-0.5">RES</TableHead>
-                      <TableHead className="h-6 w-6 text-center text-[10px] leading-none text-muted-foreground font-normal py-0.5">vs</TableHead>
-                      <TableHead className="h-6 w-10 text-center font-bold text-[10px] leading-none px-1 py-0.5">RES</TableHead>
-                      <TableHead className="h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5">EQUIPA B</TableHead>
+                    <TableRow className={cn("hover:bg-slate-100 h-6", isPresentationMode && "h-5")}>
+                      <TableHead className={cn("h-6 w-9 text-center font-bold text-[10px] leading-none px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>CAMPO</TableHead>
+                      <TableHead className={cn("h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>EQUIPA A</TableHead>
+                      <TableHead className={cn("h-6 w-10 text-center font-bold text-[10px] leading-none px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>RES</TableHead>
+                      <TableHead className={cn("h-6 w-6 text-center text-[10px] leading-none text-muted-foreground font-normal py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>vs</TableHead>
+                      <TableHead className={cn("h-6 w-10 text-center font-bold text-[10px] leading-none px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>RES</TableHead>
+                      <TableHead className={cn("h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0")}>EQUIPA B</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1419,14 +1479,14 @@ export default function Nonstop() {
                       const courtNum = cIdx + 1;
                       const matchResult = results?.find(res => res.round === roundNum && res.court === courtNum);
                       return (
-                        <TableRow key={courtNum} className="h-7">
-                          <TableCell className="text-center text-[11px] font-bold bg-slate-50 border-r px-1 py-1">{courtNum}</TableCell>
-                          <TableCell className="w-[34%] max-w-0 px-1 py-1">
+                        <TableRow key={courtNum} className={cn("h-7", isPresentationMode && "h-6")}>
+                          <TableCell className={cn("text-center text-[11px] font-bold bg-slate-50 border-r px-1 py-1", isPresentationMode && "text-[10px] py-0.5")}>{courtNum}</TableCell>
+                          <TableCell className={cn("w-[34%] max-w-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Select 
                               value={matchResult?.teamAId?.toString()} 
                               onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamAId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamBId: matchResult?.teamBId ?? 0 })}
                             >
-                              <SelectTrigger className="w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5">
+                              <SelectTrigger className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1")}>
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1434,11 +1494,11 @@ export default function Nonstop() {
                               </SelectContent>
                             </Select>
                           </TableCell>
-                          <TableCell className="p-0 px-1 py-1">
+                          <TableCell className={cn("p-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Input 
                               type="text"
                               inputMode="numeric"
-                              className="border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0"
+                              className={cn("border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7")}
                               value={getScoreValue(roundNum, courtNum, "A", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "A", e.target.value)}
                               onBlur={() => commitScore(roundNum, courtNum, "A", matchResult)}
@@ -1449,12 +1509,12 @@ export default function Nonstop() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="text-center text-[10px] text-muted-foreground bg-slate-50 border-x py-1">vs</TableCell>
-                          <TableCell className="p-0 px-1 py-1">
+                          <TableCell className={cn("text-center text-[10px] text-muted-foreground bg-slate-50 border-x py-1", isPresentationMode && "text-[9px] py-0.5")}>vs</TableCell>
+                          <TableCell className={cn("p-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Input 
                               type="text"
                               inputMode="numeric"
-                              className="border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0"
+                              className={cn("border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7")}
                               value={getScoreValue(roundNum, courtNum, "B", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "B", e.target.value)}
                               onBlur={() => commitScore(roundNum, courtNum, "B", matchResult)}
@@ -1465,12 +1525,12 @@ export default function Nonstop() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="w-[34%] max-w-0 px-1 py-1">
+                          <TableCell className={cn("w-[34%] max-w-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Select 
                               value={matchResult?.teamBId?.toString()} 
                               onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamBId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamAId: matchResult?.teamAId ?? 0 })}
                             >
-                              <SelectTrigger className="w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5">
+                              <SelectTrigger className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1")}>
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1543,4 +1603,3 @@ function TeamForm({
     </Form>
   );
 }
-

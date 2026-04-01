@@ -1,14 +1,43 @@
+function stripInvalidSurrogates(value: string) {
+  let result = "";
+
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        result += value[i] + value[i + 1];
+        i++;
+      }
+      continue;
+    }
+
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      continue;
+    }
+
+    result += value[i];
+  }
+
+  return result;
+}
+
 function normalizeWhatsAppMessage(message: string) {
-  return message.normalize("NFC").replace(/\r\n/g, "\n");
+  return stripInvalidSurrogates(message).normalize("NFC").replace(/\r\n/g, "\n");
+}
+
+function encodeWhatsAppMessage(message: string) {
+  return encodeURIComponent(normalizeWhatsAppMessage(message));
 }
 
 export function openWhatsAppGeneral(message: string): Window | null {
-  const encodedMessage = encodeURIComponent(normalizeWhatsAppMessage(message));
+  const encodedMessage = encodeWhatsAppMessage(message);
   return window.open(`https://wa.me/?text=${encodedMessage}`, "_blank");
 }
 
 export function openWhatsApp(phone: string, message: string, windowRef?: { current: Window | null }): Window | null {
-  const encodedMessage = encodeURIComponent(normalizeWhatsAppMessage(message));
+  const encodedMessage = encodeWhatsAppMessage(message);
   const cleanPhone = phone.replace(/\D/g, '');
   
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);

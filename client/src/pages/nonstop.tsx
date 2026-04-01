@@ -97,9 +97,6 @@ export default function Nonstop() {
       });
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/nonstop/timer"] });
-    },
   });
 
   const syncTimer = (
@@ -156,15 +153,17 @@ export default function Nonstop() {
     const nextTimerState = syncedTimer.timerState as TimerState;
     const nextIsActive = Boolean(syncedTimer.isActive);
     const nextRound = Math.max(1, syncedTimer.round || 1);
-    const nextTimeLeft = Math.max(0, syncedTimer.timeLeft || 0);
     const nextPhaseEndAt = syncedTimer.phaseEndsAt
       ? new Date(syncedTimer.phaseEndsAt).getTime()
       : null;
+    const nextTimeLeft =
+      nextIsActive && nextPhaseEndAt
+        ? Math.max(0, Math.ceil((nextPhaseEndAt - Date.now()) / 1000))
+        : Math.max(0, syncedTimer.timeLeft || 0);
 
     const samePhase =
       nextTimerState === timerState &&
-      nextRound === round &&
-      nextIsActive === isActive;
+      nextRound === round;
 
     setTimerState(nextTimerState);
     setIsActive(nextIsActive);
@@ -185,7 +184,7 @@ export default function Nonstop() {
     } else {
       phaseEndAtRef.current = nextPhaseEndAt;
     }
-  }, [syncedTimer?.updatedAt, syncedTimer?.timeLeft, timerState, round, isActive]);
+  }, [syncedTimer?.updatedAt, syncedTimer?.timeLeft, timerState, round]);
 
   const playSound = (type: 'start-warmup' | 'start-game' | 'end-game' | 'final') => {
     let soundType = settings?.startGameSound || 'beep-high';
@@ -1076,7 +1075,7 @@ export default function Nonstop() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 px-3 text-[10px] text-orange-500 border-orange-500/50 hover:bg-orange-500/10"
+                    className="order-2 h-8 px-3 text-[10px] text-orange-500 border-orange-500/50 hover:bg-orange-500/10"
                     onClick={() => {
                     const remaining = phaseEndAtRef.current
                       ? Math.max(0, Math.ceil((phaseEndAtRef.current - Date.now()) / 1000))
@@ -1101,7 +1100,7 @@ export default function Nonstop() {
                       <Button
                         variant="destructive"
                         size="icon"
-                        className="h-8 w-8"
+                        className="order-1 h-8 w-8"
                         title="Parar cronómetro"
                       >
                         <Square className="h-3 w-3" />
@@ -1311,15 +1310,15 @@ export default function Nonstop() {
             <CardContent className="p-0 max-h-[30vh] overflow-auto bg-slate-100">
               <Table>
                 <TableHeader className="bg-orange-600 text-white">
-                  <TableRow className="hover:bg-orange-600 h-7">
-                    <TableHead className="text-white font-bold uppercase text-[10px] py-1 px-2 min-w-[200px]">Duplas</TableHead>
+                  <TableRow className="hover:bg-orange-600 h-6">
+                    <TableHead className="h-6 text-white font-bold uppercase text-[10px] leading-none py-0.5 px-2 min-w-[200px]">Duplas</TableHead>
                     {Array.from({ length: numRounds }).map((_, i) => (
-                      <TableHead key={i} className="text-white font-bold text-center text-[10px] py-1 border-l border-orange-500">Ronda {i + 1}</TableHead>
+                      <TableHead key={i} className="h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 whitespace-nowrap min-w-[64px]">Ronda {i + 1}</TableHead>
                     ))}
-                    <TableHead className="text-white font-bold text-center text-[10px] py-1 border-l border-orange-500">JG</TableHead>
-                    <TableHead className="text-white font-bold text-center text-[10px] py-1 border-l border-orange-500">JP</TableHead>
-                    <TableHead className="text-white font-bold text-center text-[10px] py-1 border-l border-orange-500">DIF.</TableHead>
-                    <TableHead className="text-white font-bold text-center text-[10px] py-1 border-l border-orange-500 w-16">Pontos</TableHead>
+                    <TableHead className="h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500">JG</TableHead>
+                    <TableHead className="h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500">JP</TableHead>
+                    <TableHead className="h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500">DIF.</TableHead>
+                    <TableHead className="h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 w-16">Pontos</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1358,13 +1357,13 @@ export default function Nonstop() {
               <CardContent className="p-0">
                 <Table>
                   <TableHeader className="bg-slate-100">
-                    <TableRow className="hover:bg-slate-100 h-7">
-                      <TableHead className="w-9 text-center font-bold text-[10px] px-1 py-1">CAMPO</TableHead>
-                      <TableHead className="font-bold text-[10px] w-[34%] px-1 py-1">EQUIPA A</TableHead>
-                      <TableHead className="w-10 text-center font-bold text-[10px] px-1 py-1">RES</TableHead>
-                      <TableHead className="w-6 text-center text-[10px] text-muted-foreground font-normal py-1">vs</TableHead>
-                      <TableHead className="w-10 text-center font-bold text-[10px] px-1 py-1">RES</TableHead>
-                      <TableHead className="font-bold text-[10px] w-[34%] px-1 py-1">EQUIPA B</TableHead>
+                    <TableRow className="hover:bg-slate-100 h-6">
+                      <TableHead className="h-6 w-9 text-center font-bold text-[10px] leading-none px-1 py-0.5">CAMPO</TableHead>
+                      <TableHead className="h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5">EQUIPA A</TableHead>
+                      <TableHead className="h-6 w-10 text-center font-bold text-[10px] leading-none px-1 py-0.5">RES</TableHead>
+                      <TableHead className="h-6 w-6 text-center text-[10px] leading-none text-muted-foreground font-normal py-0.5">vs</TableHead>
+                      <TableHead className="h-6 w-10 text-center font-bold text-[10px] leading-none px-1 py-0.5">RES</TableHead>
+                      <TableHead className="h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5">EQUIPA B</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

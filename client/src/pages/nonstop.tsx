@@ -1000,7 +1000,7 @@ export default function Nonstop() {
         
         <div className="flex flex-wrap items-center gap-2">
           <Card className={cn(
-            "flex items-center gap-4 px-4 py-2 border-2",
+            "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[420px]",
             isActive ? "bg-orange-950 border-orange-500" : "bg-slate-900 border-slate-800"
           )}>
             <div className="flex flex-col">
@@ -1018,7 +1018,7 @@ export default function Nonstop() {
               </span>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center justify-end gap-1 min-w-[220px]">
               {timerState === 'warmup' && (
                 <Button
                   size="sm"
@@ -1050,7 +1050,7 @@ export default function Nonstop() {
 
               {!isActive ? (
                 <>
-                  <Button size="sm" className="h-8 text-[10px] px-2 bg-orange-600 hover:bg-orange-500" onClick={() => {
+                  <Button size="sm" className="h-8 w-[130px] text-[10px] px-2 bg-orange-600 hover:bg-orange-500 justify-center" onClick={() => {
                     if (timeLeft > 0 && timerState !== 'idle') {
                       const nextPhaseEndAt = Date.now() + timeLeft * 1000;
                       phaseEndAtRef.current = nextPhaseEndAt;
@@ -1073,9 +1073,9 @@ export default function Nonstop() {
               ) : (
                 <>
                   <Button
-                    variant="outline"
+                    variant="default"
                     size="sm"
-                    className="order-2 h-8 px-3 text-[10px] text-orange-500 border-orange-500/50 hover:bg-orange-500/10"
+                    className="h-8 w-[130px] px-3 text-[10px] border-orange-500 bg-orange-600 text-white hover:bg-orange-500 justify-center"
                     onClick={() => {
                     const remaining = phaseEndAtRef.current
                       ? Math.max(0, Math.ceil((phaseEndAtRef.current - Date.now()) / 1000))
@@ -1098,9 +1098,9 @@ export default function Nonstop() {
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button
-                        variant="destructive"
+                        variant="outline"
                         size="icon"
-                        className="order-1 h-8 w-8"
+                        className="h-8 w-8 border-red-500/60 text-red-500 hover:bg-red-500/10"
                         title="Parar cronómetro"
                       >
                         <Square className="h-3 w-3" />

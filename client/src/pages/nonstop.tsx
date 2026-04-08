@@ -78,6 +78,10 @@ export default function Nonstop() {
     round: number;
   } | null>(null);
   const pendingTimerUntilRef = useRef(0);
+  const lastHandledPhaseCompletionRef = useRef<string | null>(null);
+  const soundBusyUntilRef = useRef(0);
+  const soundTimeoutsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const lastQueuedSoundRef = useRef<{ key: string; at: number } | null>(null);
 
   const numCourts = settings?.nonstopCourts || 3;
   const numTeams = numCourts * 2;
@@ -215,95 +219,153 @@ export default function Nonstop() {
     }
   }, [syncedTimer?.updatedAt, syncedTimer?.timeLeft, timerState, round]);
 
-  const playSound = (type: 'start-warmup' | 'start-game' | 'end-game' | 'final') => {
+  const resolveSoundType = (
+    type: 'start-warmup' | 'start-game' | 'end-game' | 'final'
+  ) => {
     let soundType = settings?.startGameSound || 'beep-high';
     if (type === 'start-warmup') soundType = settings?.startWarmupSound || 'beep-low';
     if (type === 'end-game') soundType = settings?.endGameSound || 'beep-low';
     if (type === 'final') soundType = settings?.finalSound || 'beep-high';
+    return soundType;
+  };
 
-    const frequency = soundType === 'beep-high' ? 880 : 
-                      soundType === 'beep-low' ? 440 :
-                      soundType === 'horn-deep' ? 60 :
-                      soundType === 'air-horn' ? 85 :
-                      soundType.includes('horn') ? 100 : 440; // Frequency for horn variants
-    
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    
-    const playBeep = (delay: number, duration: number = 0.4, isHorn: boolean = false) => {
-      const osc1 = ctx.createOscillator();
-      const osc2 = ctx.createOscillator(); 
-      const gain = ctx.createGain();
-      
-      osc1.type = isHorn ? 'sawtooth' : 'square';
-      osc2.type = isHorn ? 'square' : 'square';
-      
-      osc1.frequency.setValueAtTime(frequency, ctx.currentTime + delay);
-      osc2.frequency.setValueAtTime(frequency * 1.01, ctx.currentTime + delay); 
-      
-      if (isHorn) {
-        osc1.frequency.setValueAtTime(frequency, ctx.currentTime + delay);
-        osc1.frequency.linearRampToValueAtTime(frequency * 0.98, ctx.currentTime + delay + duration);
-        osc2.frequency.setValueAtTime(frequency * 1.01, ctx.currentTime + delay);
-        osc2.frequency.linearRampToValueAtTime(frequency * 0.99, ctx.currentTime + delay + duration);
-      }
-      
-      gain.gain.setValueAtTime(0, ctx.currentTime + delay);
-      gain.gain.linearRampToValueAtTime(isHorn ? 0.4 : 0.1, ctx.currentTime + delay + 0.05); 
-      gain.gain.setValueAtTime(isHorn ? 0.4 : 0.1, ctx.currentTime + delay + duration - 0.1);
-      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + delay + duration);
-      
-      osc1.connect(gain);
-      osc2.connect(gain);
-      gain.connect(ctx.destination);
-      
-      osc1.start(ctx.currentTime + delay);
-      osc2.start(ctx.currentTime + delay);
-      osc1.stop(ctx.currentTime + delay + duration);
-      osc2.stop(ctx.currentTime + delay + duration);
-    };
-
-    const playAirHornSample = (durationSeconds: number) => {
-      const audio = new Audio("/sounds/air-horn.mpeg");
-      audio.preload = "auto";
-      audio.currentTime = 0;
-      let stopTimer: ReturnType<typeof setTimeout> | null = null;
-
-      if (durationSeconds > 0) {
-        stopTimer = setTimeout(() => {
-          audio.pause();
-          audio.currentTime = 0;
-        }, durationSeconds * 1000);
-      }
-
-      audio.addEventListener("ended", () => {
-        if (stopTimer) clearTimeout(stopTimer);
-      });
-
-      audio.play().catch(() => {
-        if (stopTimer) clearTimeout(stopTimer);
-        playBeep(0, Math.max(1, durationSeconds), true);
-      });
-    };
-
+  const getSoundDurationMs = (soundType: string) => {
     const configuredDuration = getConfiguredDuration(soundType, settings);
-
-    if (soundType === 'air-horn') {
-      playAirHornSample(configuredDuration ?? 5.0);
-    } else if (soundType === 'horn' || soundType === 'horn-deep') {
-      playBeep(0, configuredDuration ?? 3.0, true); 
-    } else if (soundType === 'horn-double') {
-      playBeep(0, 1.2, true);
-      playBeep(1.5, 1.5, true);
-    } else if (soundType.includes('long')) {
+    if (soundType === 'air-horn') return (configuredDuration ?? 5.0) * 1000;
+    if (soundType === 'horn' || soundType === 'horn-deep') return (configuredDuration ?? 3.0) * 1000;
+    if (soundType === 'horn-double') return 3000;
+    if (soundType.includes('long')) {
       const duration = configuredDuration ?? 1.0;
-      playBeep(0, duration);
-      playBeep(duration + 0.2, duration);
-    } else {
-      // Play 3 beeps
-      playBeep(0, 0.4);
-      playBeep(0.5, 0.4);
-      playBeep(1.0, 0.4);
+      return (duration * 2 + 0.2) * 1000;
     }
+    return 1400;
+  };
+
+  const playSound = (type: 'start-warmup' | 'start-game' | 'end-game' | 'final') => {
+    const soundType = resolveSoundType(type);
+    const now = Date.now();
+    const dedupeKey = `${type}:${timerState}:${round}`;
+    const lastQueuedSound = lastQueuedSoundRef.current;
+    if (
+      lastQueuedSound &&
+      lastQueuedSound.key === dedupeKey &&
+      now - lastQueuedSound.at < 1200
+    ) {
+      return;
+    }
+    lastQueuedSoundRef.current = { key: dedupeKey, at: now };
+
+    const durationMs = getSoundDurationMs(soundType);
+    const scheduledStart = Math.max(now, soundBusyUntilRef.current);
+    const queueGapMs = 120;
+    soundBusyUntilRef.current = scheduledStart + durationMs + queueGapMs;
+
+    const runPlayback = () => {
+      const liveSoundType = resolveSoundType(type);
+
+      const frequency = liveSoundType === 'beep-high' ? 880 : 
+                        liveSoundType === 'beep-low' ? 440 :
+                        liveSoundType === 'horn-deep' ? 60 :
+                        liveSoundType === 'air-horn' ? 85 :
+                        liveSoundType.includes('horn') ? 100 : 440; // Frequency for horn variants
+      
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      const playBeep = (delay: number, duration: number = 0.4, isHorn: boolean = false) => {
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator(); 
+        const gain = ctx.createGain();
+        
+        osc1.type = isHorn ? 'sawtooth' : 'square';
+        osc2.type = isHorn ? 'square' : 'square';
+        
+        osc1.frequency.setValueAtTime(frequency, ctx.currentTime + delay);
+        osc2.frequency.setValueAtTime(frequency * 1.01, ctx.currentTime + delay); 
+        
+        if (isHorn) {
+          osc1.frequency.setValueAtTime(frequency, ctx.currentTime + delay);
+          osc1.frequency.linearRampToValueAtTime(frequency * 0.98, ctx.currentTime + delay + duration);
+          osc2.frequency.setValueAtTime(frequency * 1.01, ctx.currentTime + delay);
+          osc2.frequency.linearRampToValueAtTime(frequency * 0.99, ctx.currentTime + delay + duration);
+        }
+        
+        gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+        gain.gain.linearRampToValueAtTime(isHorn ? 0.4 : 0.1, ctx.currentTime + delay + 0.05); 
+        gain.gain.setValueAtTime(isHorn ? 0.4 : 0.1, ctx.currentTime + delay + duration - 0.1);
+        gain.gain.linearRampToValueAtTime(0, ctx.currentTime + delay + duration);
+        
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc1.start(ctx.currentTime + delay);
+        osc2.start(ctx.currentTime + delay);
+        osc1.stop(ctx.currentTime + delay + duration);
+        osc2.stop(ctx.currentTime + delay + duration);
+      };
+
+      const playAirHornSample = (durationSeconds: number) => {
+        const audio = new Audio("/sounds/air-horn.mpeg");
+        audio.preload = "auto";
+        audio.currentTime = 0;
+        let stopTimer: ReturnType<typeof setTimeout> | null = null;
+
+        if (durationSeconds > 0) {
+          stopTimer = setTimeout(() => {
+            audio.pause();
+            audio.currentTime = 0;
+          }, durationSeconds * 1000);
+        }
+
+        audio.addEventListener("ended", () => {
+          if (stopTimer) clearTimeout(stopTimer);
+        });
+
+        audio.play().catch(() => {
+          if (stopTimer) clearTimeout(stopTimer);
+          playBeep(0, Math.max(1, durationSeconds), true);
+        });
+      };
+
+      const configuredDuration = getConfiguredDuration(liveSoundType, settings);
+
+      if (liveSoundType === 'air-horn') {
+        playAirHornSample(configuredDuration ?? 5.0);
+      } else if (liveSoundType === 'horn' || liveSoundType === 'horn-deep') {
+        playBeep(0, configuredDuration ?? 3.0, true); 
+      } else if (liveSoundType === 'horn-double') {
+        playBeep(0, 1.2, true);
+        playBeep(1.5, 1.5, true);
+      } else if (liveSoundType.includes('long')) {
+        const duration = configuredDuration ?? 1.0;
+        playBeep(0, duration);
+        playBeep(duration + 0.2, duration);
+      } else {
+        // Play 3 beeps
+        playBeep(0, 0.4);
+        playBeep(0.5, 0.4);
+        playBeep(1.0, 0.4);
+      }
+    };
+
+    const delay = scheduledStart - now;
+    if (delay <= 0) {
+      runPlayback();
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      runPlayback();
+      soundTimeoutsRef.current = soundTimeoutsRef.current.filter((id) => id !== timeoutId);
+    }, delay);
+    soundTimeoutsRef.current.push(timeoutId);
+  };
+
+  const clearScheduledSounds = () => {
+    soundTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    soundTimeoutsRef.current = [];
+    soundBusyUntilRef.current = 0;
+    lastQueuedSoundRef.current = null;
   };
 
   const beginPhase = (
@@ -353,6 +415,11 @@ export default function Nonstop() {
 
   useEffect(() => {
     if (isActive && timeLeft === 0) {
+      const completionKey = `${timerState}:${round}:${phaseEndAtRef.current ?? "no-phase-end"}`;
+      if (lastHandledPhaseCompletionRef.current === completionKey) {
+        return;
+      }
+      lastHandledPhaseCompletionRef.current = completionKey;
       phaseEndAtRef.current = null;
       if (timerState === 'warmup') {
         // Warmup -> Game 1
@@ -390,6 +457,12 @@ export default function Nonstop() {
     }
   }, [isActive, timeLeft, timerState, round, gameMinutes, restMinutes, totalRounds]);
 
+  useEffect(() => {
+    return () => {
+      clearScheduledSounds();
+    };
+  }, []);
+
   const startTimer = () => {
     if (warmupMinutes > 0) {
       beginPhase('warmup', warmupMinutes * 60, 'start-warmup', true, 1);
@@ -399,6 +472,7 @@ export default function Nonstop() {
   };
 
   const stopTimer = () => {
+    clearScheduledSounds();
     setIsActive(false);
     setTimerState('idle');
     setTimeLeft(0);
@@ -706,6 +780,7 @@ export default function Nonstop() {
       return res.json();
     },
     onSuccess: () => {
+      clearScheduledSounds();
       queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
       queryClient.invalidateQueries({ queryKey: ["/api/results"] });
       queryClient.invalidateQueries({ queryKey: ["/api/nonstop/timer"] });

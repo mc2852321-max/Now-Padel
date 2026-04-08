@@ -69,6 +69,7 @@ export default function Nonstop() {
   const [isManageTeamsOpen, setIsManageTeamsOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
+  const [isDesktopPresentationViewport, setIsDesktopPresentationViewport] = useState(false);
   const [confirmStopPresentation, setConfirmStopPresentation] = useState(false);
   const phaseEndAtRef = useRef<number | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
@@ -167,6 +168,22 @@ export default function Nonstop() {
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
   }, [isPresentationMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(min-width: 1024px) and (pointer: fine)");
+    const updateViewportType = () => setIsDesktopPresentationViewport(mediaQuery.matches);
+
+    updateViewportType();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateViewportType);
+      return () => mediaQuery.removeEventListener("change", updateViewportType);
+    }
+
+    mediaQuery.addListener(updateViewportType);
+    return () => mediaQuery.removeListener(updateViewportType);
+  }, []);
 
   useEffect(() => {
     if (!syncedTimer) return;
@@ -1137,6 +1154,11 @@ export default function Nonstop() {
   return (
     <div
       ref={presentationContainerRef}
+      style={
+        isPresentationMode && isDesktopPresentationViewport
+          ? ({ zoom: 1.25 } as any)
+          : undefined
+      }
       className={cn(
         "space-y-8 pb-10",
         isPresentationMode && "fixed inset-0 z-[80] bg-background overflow-auto p-1 space-y-1 pb-1 max-[900px]:p-0.5 max-[900px]:space-y-0.5 max-[900px]:pb-0.5"

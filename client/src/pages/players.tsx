@@ -27,6 +27,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar } from "@/components/ui/calendar";
@@ -36,7 +44,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { SiWhatsapp } from "react-icons/si";
-import { Plus, Trash2, Edit2, Filter, Clock, Calendar as CalendarIcon, Search } from "lucide-react";
+import { Plus, Trash2, Edit2, Filter, Clock, Calendar as CalendarIcon, Search, ChevronDown } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { openWhatsApp } from "@/lib/whatsapp";
@@ -54,6 +62,15 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const HOURS = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
 const MINUTES = ["00", "30"];
 
+function parseArrayField(value?: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item));
+  } catch {}
+  return [];
+}
+
 type PlayersPageResponse = {
   items: Player[];
   total: number;
@@ -65,6 +82,7 @@ type PlayersPageResponse = {
 export default function Players() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [levelFilter, setLevelFilter] = useState<string>("all");
+  const [profileTagFilter, setProfileTagFilter] = useState<string[]>([]);
   const [searchText, setSearchText] = useState<string>("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -81,17 +99,35 @@ export default function Players() {
   const [lastSelectedIds, setLastSelectedIds] = useState<number[]>([]);
   const whatsappWindowRef = useRef<Window | null>(null);
   const { toast } = useToast();
+  const { data: settings } = useQuery<Settings>({
+    queryKey: ["/api/settings"],
+  });
 
-  const queryKey = ["/api/players", { level: levelFilter, search: searchText, page, pageSize }];
+  const availableProfileOptions = (() => {
+    const parsed = parseArrayField(settings?.playerProfileOptions);
+    if (parsed.length > 0) return parsed;
+    return ["Academia", "Fecha jogos", "Non Stop"];
+  })();
+
+  const profileFilterLabel = profileTagFilter.length === 0
+    ? "Todos Perfis"
+    : profileTagFilter.length === 1
+      ? profileTagFilter[0]
+      : `${profileTagFilter.length} perfis`;
+
+  const queryKey = ["/api/players", { level: levelFilter, profileTags: profileTagFilter, search: searchText, page, pageSize }];
 
   const { data, isLoading } = useQuery<PlayersPageResponse>({
     queryKey,
     queryFn: async ({ queryKey }) => {
-      const [url, params] = queryKey as [string, { level: string; search: string; page: number; pageSize: number }];
+      const [url, params] = queryKey as [string, { level: string; profileTags: string[]; search: string; page: number; pageSize: number }];
       const searchParams = new URLSearchParams();
       if (params.level && params.level !== "all") {
         searchParams.append("level", params.level);
       }
+      params.profileTags.forEach((tag) => {
+        searchParams.append("profileTag", tag);
+      });
       if (params.search.trim()) {
         searchParams.append("search", params.search.trim());
       }
@@ -116,22 +152,13 @@ export default function Players() {
 
   useEffect(() => {
     setSelectedIds([]);
-  }, [page, pageSize, levelFilter, searchText]);
+  }, [page, pageSize, levelFilter, profileTagFilter, searchText]);
 
   useEffect(() => {
     if (page > totalPages) {
       setPage(totalPages);
     }
   }, [page, totalPages]);
-
-  const parseArrayField = (value?: string | null) => {
-    if (!value) return [] as string[];
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) return parsed.map((item) => String(item));
-    } catch {}
-    return [];
-  };
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -294,6 +321,47 @@ export default function Players() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-muted-foreground" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="w-[180px] justify-between font-normal">
+                  <span className="truncate">{profileFilterLabel}</span>
+                  <ChevronDown className="h-4 w-4 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-[220px]">
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    setProfileTagFilter([]);
+                    setPage(1);
+                  }}
+                >
+                  Todos Perfis
+                </DropdownMenuItem>
+                {availableProfileOptions.length > 0 && <DropdownMenuSeparator />}
+                {availableProfileOptions.map((option) => (
+                  <DropdownMenuCheckboxItem
+                    key={option}
+                    checked={profileTagFilter.includes(option)}
+                    onSelect={(event) => event.preventDefault()}
+                    onCheckedChange={(checked) => {
+                      setProfileTagFilter((prev) => {
+                        if (checked === true) {
+                          return prev.includes(option) ? prev : [...prev, option];
+                        }
+                        return prev.filter((tag) => tag !== option);
+                      });
+                      setPage(1);
+                    }}
+                  >
+                    {option}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <Dialog open={isBulkMessageOpen} onOpenChange={setIsBulkMessageOpen}>
             <DialogTrigger asChild>

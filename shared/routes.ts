@@ -19,6 +19,7 @@ export const api = {
       input: z.object({
         level: z.string().optional(),
         search: z.string().optional(),
+        profileTag: z.union([z.string(), z.array(z.string())]).optional(),
         page: z.coerce.number().int().min(1).optional(),
         pageSize: z.coerce.number().int().min(1).max(100).optional(),
       }).optional(),

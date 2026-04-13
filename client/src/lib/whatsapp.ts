@@ -27,9 +27,20 @@ function stripReplacementChar(value: string) {
   return value.replace(/\uFFFD/g, "");
 }
 
+function isEmojiLikeCodePoint(codePoint: number) {
+  if (codePoint >= 0x1f300 && codePoint <= 0x1faff) return true;
+  if (codePoint >= 0x2600 && codePoint <= 0x27bf) return true;
+  if (codePoint === 0xfe0f || codePoint === 0x200d) return true;
+  return false;
+}
+
 function stripEmojiChars(value: string) {
-  return value
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "");
+  return Array.from(value)
+    .filter((char) => {
+      const codePoint = char.codePointAt(0);
+      return codePoint == null || !isEmojiLikeCodePoint(codePoint);
+    })
+    .join("");
 }
 
 function normalizeWhatsAppMessage(message: string, stripEmoji = false) {

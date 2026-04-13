@@ -204,9 +204,15 @@ export async function registerRoutes(
     try {
       const level = req.query.level as string | undefined;
       const search = req.query.search as string | undefined;
+      const profileTagQuery = req.query.profileTag;
+      const profileTags = Array.isArray(profileTagQuery)
+        ? profileTagQuery.map((tag) => String(tag).trim()).filter(Boolean)
+        : typeof profileTagQuery === "string"
+          ? [profileTagQuery.trim()].filter(Boolean)
+          : [];
       const page = Number(req.query.page ?? 1);
       const pageSize = Number(req.query.pageSize ?? 25);
-      const players = await storage.getPlayersPaginated({ level, search, page, pageSize });
+      const players = await storage.getPlayersPaginated({ level, search, profileTags, page, pageSize });
       res.json(players);
     } catch (err) {
       console.error("[players/list] error:", err);

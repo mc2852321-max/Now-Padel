@@ -1,6 +1,6 @@
 import { players, teams, nonstopResults, nonstopTimer, settings, authorizedUsers, type Player, type InsertPlayer, type UpdatePlayerRequest, type Team, type InsertTeam, type NonstopResult, type InsertNonstopResult, type NonstopTimer, type InsertNonstopTimer, type Settings, type InsertSettings, type AuthorizedUser, type InsertAuthorizedUser } from "../shared/schema.js";
 import { db } from "./db.js";
-import { eq, and, or, ilike, desc, count } from "drizzle-orm";
+import { eq, and, or, ilike, desc, count, sql } from "drizzle-orm";
 
 export type PlayersPage = {
   items: Player[];
@@ -13,7 +13,7 @@ export type PlayersPage = {
 export interface IStorage {
   // Players
   getPlayers(filters?: { level?: string }): Promise<Player[]>;
-  getPlayersPaginated(filters?: { level?: string; search?: string; page?: number; pageSize?: number }): Promise<PlayersPage>;
+  getPlayersPaginated(filters?: { level?: string; search?: string; profileTags?: string[]; page?: number; pageSize?: number }): Promise<PlayersPage>;
   createPlayer(player: InsertPlayer): Promise<Player>;
   updatePlayer(id: number, player: UpdatePlayerRequest): Promise<Player>;
   deletePlayer(id: number): Promise<void>;
@@ -54,12 +54,13 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(players);
   }
 
-  async getPlayersPaginated(filters?: { level?: string; search?: string; page?: number; pageSize?: number }): Promise<PlayersPage> {
+  async getPlayersPaginated(filters?: { level?: string; search?: string; profileTags?: string[]; page?: number; pageSize?: number }): Promise<PlayersPage> {
     const requestedPage = Number.isFinite(filters?.page) ? Number(filters?.page) : 1;
     const requestedPageSize = Number.isFinite(filters?.pageSize) ? Number(filters?.pageSize) : 25;
     const page = Math.max(1, Math.trunc(requestedPage));
     const pageSize = Math.min(100, Math.max(1, Math.trunc(requestedPageSize)));
     const search = (filters?.search ?? "").trim();
+    const profileTags = (filters?.profileTags ?? []).map((tag) => tag.trim()).filter(Boolean);
 
     const conditions: any[] = [];
     if (filters?.level && filters.level !== "all") {
@@ -72,6 +73,16 @@ export class DatabaseStorage implements IStorage {
           ilike(players.phone, `%${search}%`),
         )!,
       );
+    }
+    if (profileTags.length > 0) {
+      const profileConditions = profileTags.map((tag) =>
+        sql`EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(COALESCE(NULLIF(${players.profileTags}, ''), '[]')::jsonb) AS profile(value)
+          WHERE profile.value = ${tag}
+        )`,
+      );
+      conditions.push(profileConditions.length > 1 ? or(...profileConditions)! : profileConditions[0]);
     }
 
     const whereClause = conditions.length > 1

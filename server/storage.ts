@@ -82,7 +82,7 @@ export class DatabaseStorage implements IStorage {
           WHERE profile.value = ${tag}
         )`,
       );
-      conditions.push(profileConditions.length > 1 ? or(...profileConditions)! : profileConditions[0]);
+      conditions.push(profileConditions.length > 1 ? and(...profileConditions)! : profileConditions[0]);
     }
 
     const whereClause = conditions.length > 1

@@ -120,27 +120,39 @@ const addUserSchema = z.object({
 });
 
 function AuthorizedUsersSection() {
+  const addUserWithPasswordSchema = addUserSchema.extend({
+    password: z.string().min(4, "A password deve ter pelo menos 4 caracteres"),
+    confirmPassword: z.string().min(1, "Confirme a password"),
+  }).refine((data) => data.password === data.confirmPassword, {
+    message: "As passwords nao coincidem",
+    path: ["confirmPassword"],
+  });
+
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [showAddPassword, setShowAddPassword] = useState(false);
+  const [showAddConfirmPassword, setShowAddConfirmPassword] = useState(false);
 
   const { data: authorizedUsers = [], isLoading } = useQuery<AuthorizedUser[]>({
     queryKey: ["/api/authorized-users"]
   });
 
-  const addUserForm = useForm({
-    resolver: zodResolver(addUserSchema),
-    defaultValues: { email: "", name: "" }
+  const addUserForm = useForm<z.infer<typeof addUserWithPasswordSchema>>({
+    resolver: zodResolver(addUserWithPasswordSchema),
+    defaultValues: { email: "", name: "", password: "", confirmPassword: "" }
   });
 
   const addMutation = useMutation({
-    mutationFn: async (data: { email: string; name?: string }) => {
+    mutationFn: async (data: { email: string; name?: string; password: string }) => {
       const res = await apiRequest("POST", "/api/authorized-users", data);
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/authorized-users"] });
-      toast({ title: "Utilizador adicionado", description: "O email foi adicionado à lista de utilizadores autorizados." });
+      toast({ title: "Utilizador adicionado", description: "Utilizador criado com email e password de acesso." });
       addUserForm.reset();
+      setShowAddPassword(false);
+      setShowAddConfirmPassword(false);
       setDialogOpen(false);
     },
     onError: (error: any) => {
@@ -186,11 +198,14 @@ function AuthorizedUsersSection() {
               <DialogHeader>
                 <DialogTitle>Adicionar Utilizador Autorizado</DialogTitle>
                 <DialogDescription>
-                  Adicione um email à lista de utilizadores que podem aceder à aplicação.
+                  Defina email e password inicial para criar acesso imediato.
                 </DialogDescription>
               </DialogHeader>
               <Form {...addUserForm}>
-                <form onSubmit={addUserForm.handleSubmit((data) => addMutation.mutate(data))} className="space-y-4">
+                <form
+                  onSubmit={addUserForm.handleSubmit(({ confirmPassword, ...data }) => addMutation.mutate(data))}
+                  className="space-y-4"
+                >
                   <FormField
                     control={addUserForm.control}
                     name="email"
@@ -212,6 +227,70 @@ function AuthorizedUsersSection() {
                         <FormLabel>Nome (opcional)</FormLabel>
                         <FormControl>
                           <Input placeholder="Nome do utilizador" {...field} data-testid="input-authorized-name" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={addUserForm.control}
+                    name="password"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Password</FormLabel>
+                        <FormControl>
+                          <div className="relative">
+                            <Input
+                              {...field}
+                              type={showAddPassword ? "text" : "password"}
+                              placeholder="Defina a password inicial"
+                              className="pr-10"
+                              data-testid="input-authorized-password"
+                            />
+                            <button
+                              type="button"
+                              className="absolute right-2 inset-y-0 flex items-center"
+                              onClick={() => setShowAddPassword((v) => !v)}
+                            >
+                              {showAddPassword ? (
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </button>
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={addUserForm.control}
+                    name="confirmPassword"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Confirmar password</FormLabel>
+                        <FormControl>
+                          <div className="relative">
+                            <Input
+                              {...field}
+                              type={showAddConfirmPassword ? "text" : "password"}
+                              placeholder="Repita a password"
+                              className="pr-10"
+                              data-testid="input-authorized-confirm-password"
+                            />
+                            <button
+                              type="button"
+                              className="absolute right-2 inset-y-0 flex items-center"
+                              onClick={() => setShowAddConfirmPassword((v) => !v)}
+                            >
+                              {showAddConfirmPassword ? (
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </button>
+                          </div>
                         </FormControl>
                         <FormMessage />
                       </FormItem>

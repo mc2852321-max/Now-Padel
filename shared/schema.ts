@@ -123,6 +123,11 @@ export const insertAuthorizedUserSchema = createInsertSchema(authorizedUsers).om
 export type AuthorizedUser = typeof authorizedUsers.$inferSelect;
 export type InsertAuthorizedUser = z.infer<typeof insertAuthorizedUserSchema>;
 
+export const createAuthorizedUserRequestSchema = insertAuthorizedUserSchema.extend({
+  password: z.string().min(4, "A password deve ter pelo menos 4 caracteres"),
+});
+export type CreateAuthorizedUserRequest = z.infer<typeof createAuthorizedUserRequestSchema>;
+
 // Login schema
 export const loginSchema = z.object({
   email: z.string().email("Email inválido"),

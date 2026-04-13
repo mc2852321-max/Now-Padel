@@ -2,7 +2,7 @@ import express, { type Express, type RequestHandler } from "express";
 import type { Server } from "http";
 import { storage } from "./storage.js";
 import { api } from "../shared/routes.js";
-import { insertTeamSchema, insertAuthorizedUserSchema, loginSchema, changePasswordSchema } from "../shared/schema.js";
+import { insertTeamSchema, createAuthorizedUserRequestSchema, loginSchema, changePasswordSchema } from "../shared/schema.js";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
@@ -497,14 +497,20 @@ export async function registerRoutes(
   // Authorized Users management (protected routes)
   app.get("/api/authorized-users", isAuthenticated, async (_req, res) => {
     const users = await storage.getAuthorizedUsers();
-    res.json(users);
+    res.json(users.map(({ password, ...user }) => ({ ...user, password: null })));
   });
 
   app.post("/api/authorized-users", isAuthenticated, async (req, res) => {
     try {
-      const input = insertAuthorizedUserSchema.parse(req.body);
-      const user = await storage.createAuthorizedUser(input);
-      res.status(201).json(user);
+      const input = createAuthorizedUserRequestSchema.parse(req.body);
+      const hashedPassword = await bcrypt.hash(input.password, 10);
+      const normalizedEmail = input.email.toLowerCase();
+      const user = await storage.createAuthorizedUser({
+        email: normalizedEmail,
+        name: input.name,
+      });
+      await storage.setUserPassword(user.id, hashedPassword);
+      res.status(201).json({ ...user, password: null });
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({

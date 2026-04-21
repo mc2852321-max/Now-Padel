@@ -2,6 +2,18 @@ import { pgTable, text, serial, varchar, integer, timestamp } from "drizzle-orm/
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+export const nonstopEvents = pgTable("nonstop_events", {
+  id: serial("id").primaryKey(),
+  status: text("status").notNull().default("active"),
+  label: text("label"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  finalizedBy: text("finalized_by"),
+  createdBy: text("created_by"),
+  snapshot: text("snapshot"),
+});
+
 export const players = pgTable("players", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -14,10 +26,12 @@ export const players = pgTable("players", {
 export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  eventId: integer("event_id"),
 });
 
 export const nonstopResults = pgTable("nonstop_results", {
   id: serial("id").primaryKey(),
+  eventId: integer("event_id"),
   teamAId: integer("team_a_id").notNull(),
   teamBId: integer("team_b_id").notNull(),
   scoreA: integer("score_a").notNull(),
@@ -29,6 +43,7 @@ export const nonstopResults = pgTable("nonstop_results", {
 
 export const nonstopTimer = pgTable("nonstop_timer", {
   id: serial("id").primaryKey(),
+  eventId: integer("event_id"),
   timerState: text("timer_state").notNull().default("idle"),
   isActive: integer("is_active").notNull().default(0),
   round: integer("round").notNull().default(1),
@@ -74,6 +89,7 @@ export const insertTeamSchema = createInsertSchema(teams).omit({ id: true }).ext
   name: z.string().min(1, "O nome da equipa é obrigatório"),
 });
 export const insertNonstopResultSchema = createInsertSchema(nonstopResults).omit({ id: true, playedAt: true });
+export const insertNonstopEventSchema = createInsertSchema(nonstopEvents).omit({ id: true, createdAt: true });
 
 export type Player = typeof players.$inferSelect;
 export type InsertPlayer = z.infer<typeof insertPlayerSchema>;
@@ -81,6 +97,8 @@ export type Team = typeof teams.$inferSelect;
 export type InsertTeam = z.infer<typeof insertTeamSchema>;
 export type NonstopResult = typeof nonstopResults.$inferSelect;
 export type InsertNonstopResult = z.infer<typeof insertNonstopResultSchema>;
+export type NonstopEvent = typeof nonstopEvents.$inferSelect;
+export type InsertNonstopEvent = z.infer<typeof insertNonstopEventSchema>;
 export type NonstopTimer = typeof nonstopTimer.$inferSelect;
 export const insertNonstopTimerSchema = createInsertSchema(nonstopTimer).omit({ id: true, updatedAt: true });
 export type InsertNonstopTimer = z.infer<typeof insertNonstopTimerSchema>;

@@ -10,19 +10,40 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2 } from "lucide-react";
+import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, Calendar as CalendarIcon, History } from "lucide-react";
 import * as XLSX from "xlsx-js-style";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
+import { Badge } from "@/components/ui/badge";
+import { format } from "date-fns";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 type SyncedTimer = Omit<NonstopTimer, "isActive" | "phaseEndsAt" | "updatedAt"> & {
   isActive: boolean;
   phaseEndsAt: string | null;
   updatedAt: string;
+};
+type NonstopEventSummary = {
+  id: number;
+  status: "draft" | "active" | "completed" | "cancelled" | string;
+  label: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+type NonstopEventDetails = {
+  event: NonstopEventSummary;
+  teams: Team[];
+  results: NonstopResult[];
+  timer: SyncedTimer;
+  snapshot: any | null;
 };
 
 function getConfiguredDuration(
@@ -40,24 +61,71 @@ function normalizeTeamName(name: string) {
 
 export default function Nonstop() {
   const { toast } = useToast();
+  const [viewMode, setViewMode] = useState<"current" | "history">("current");
+  const [historyDate, setHistoryDate] = useState<Date | undefined>(new Date());
+  const [selectedHistoryEventId, setSelectedHistoryEventId] = useState<number | null>(null);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] = useState(false);
+
+  const historyWindow = useMemo(() => {
+    const now = new Date();
+    const from = new Date(now);
+    from.setDate(now.getDate() - 90);
+    return {
+      fromIso: from.toISOString(),
+      toIso: now.toISOString(),
+    };
+  }, []);
+
+  const { data: currentEvent } = useQuery<NonstopEventSummary>({
+    queryKey: ["/api/nonstop/current"],
+    refetchInterval: 3000,
+    refetchOnWindowFocus: true,
+  });
+
+  const { data: events = [] } = useQuery<NonstopEventSummary[]>({
+    queryKey: [`/api/nonstop/events?from=${encodeURIComponent(historyWindow.fromIso)}&to=${encodeURIComponent(historyWindow.toIso)}`],
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
+  });
+
+  const selectedHistoryEvent = events.find((event) => event.id === selectedHistoryEventId) ?? null;
+  const readOnlyMode = viewMode === "history";
+
   const { data: settings } = useQuery<Settings>({
     queryKey: ["/api/settings"],
     refetchInterval: 3000,
     refetchOnWindowFocus: true,
   });
+
+  const teamsQueryKey = readOnlyMode && selectedHistoryEventId
+    ? `/api/teams?eventId=${selectedHistoryEventId}`
+    : "/api/teams";
+
   const { data: teams } = useQuery<Team[]>({
-    queryKey: ["/api/teams"],
+    queryKey: [teamsQueryKey],
     refetchInterval: 3000,
     refetchOnWindowFocus: true,
   });
+
+  const resultsQueryKey = readOnlyMode && selectedHistoryEventId
+    ? `/api/results?eventId=${selectedHistoryEventId}`
+    : "/api/results";
+
   const { data: results } = useQuery<NonstopResult[]>({
-    queryKey: ["/api/results"],
+    queryKey: [resultsQueryKey],
     refetchInterval: 3000,
     refetchOnWindowFocus: true,
   });
+
+  const timerQueryKey = readOnlyMode && selectedHistoryEventId
+    ? `/api/nonstop/timer?eventId=${selectedHistoryEventId}`
+    : "/api/nonstop/timer";
+
   const { data: syncedTimer } = useQuery<SyncedTimer>({
-    queryKey: ["/api/nonstop/timer"],
+    queryKey: [timerQueryKey],
     refetchInterval: 1000,
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
   });
 
@@ -73,13 +141,6 @@ export default function Nonstop() {
   const [confirmStopPresentation, setConfirmStopPresentation] = useState(false);
   const phaseEndAtRef = useRef<number | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
-  const pendingTimerRef = useRef<{
-    timerState: TimerState;
-    isActive: boolean;
-    round: number;
-  } | null>(null);
-  const pendingTimerUntilRef = useRef(0);
-  const lastHandledPhaseCompletionRef = useRef<string | null>(null);
   const soundBusyUntilRef = useRef(0);
   const soundTimeoutsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const lastQueuedSoundRef = useRef<{ key: string; at: number } | null>(null);
@@ -89,8 +150,26 @@ export default function Nonstop() {
   const numRounds = settings?.nonstopRounds || 5;
   const warmupMinutes = settings?.warmupTime ?? 0;
   const gameMinutes = settings?.gameTime ?? 20;
-  const restMinutes = settings?.restTime ?? 2;
   const totalRounds = settings?.nonstopRounds ?? 5;
+  const eventsForSelectedDate = useMemo(() => {
+    if (!historyDate) return [];
+    const dayKey = format(historyDate, "yyyy-MM-dd");
+    return events
+      .filter((event) => format(new Date(event.startedAt ?? event.createdAt), "yyyy-MM-dd") === dayKey)
+      .sort((a, b) => {
+        const aTime = new Date(a.startedAt ?? a.createdAt).getTime();
+        const bTime = new Date(b.startedAt ?? b.createdAt).getTime();
+        return aTime - bTime;
+      });
+  }, [events, historyDate]);
+
+  useEffect(() => {
+    if (viewMode !== "history") return;
+    if (selectedHistoryEventId && events.some((event) => event.id === selectedHistoryEventId)) return;
+    if (eventsForSelectedDate.length === 1) {
+      setSelectedHistoryEventId(eventsForSelectedDate[0].id);
+    }
+  }, [viewMode, selectedHistoryEventId, events, eventsForSelectedDate]);
 
   const syncTimerMutation = useMutation({
     mutationFn: async (payload: {
@@ -120,12 +199,7 @@ export default function Nonstop() {
       phaseEndsAt: number | null;
     }
   ) => {
-    pendingTimerRef.current = {
-      timerState: payload.timerState,
-      isActive: payload.isActive,
-      round: payload.round,
-    };
-    pendingTimerUntilRef.current = Date.now() + 2000;
+    if (readOnlyMode) return;
     syncTimerMutation.mutate(payload);
   };
 
@@ -198,43 +272,32 @@ export default function Nonstop() {
         ? Math.max(0, Math.ceil((nextPhaseEndAt - Date.now()) / 1000))
         : Math.max(0, syncedTimer.timeLeft || 0);
 
-    const pending = pendingTimerRef.current;
-    if (pending && Date.now() < pendingTimerUntilRef.current) {
-      const matchesPending =
-        pending.timerState === nextTimerState &&
-        pending.isActive === nextIsActive &&
-        pending.round === nextRound;
-      if (!matchesPending) {
-        return;
-      }
-      pendingTimerRef.current = null;
-      pendingTimerUntilRef.current = 0;
-    }
-
-    const samePhase =
-      nextTimerState === timerState &&
-      nextRound === round;
-
     setTimerState(nextTimerState);
     setIsActive(nextIsActive);
     setRound(nextRound);
+    setTimeLeft(nextTimeLeft);
+    phaseEndAtRef.current = nextPhaseEndAt;
+  }, [syncedTimer?.updatedAt, syncedTimer?.timeLeft]);
 
-    setTimeLeft((prev) => {
-      if (!samePhase) return nextTimeLeft;
-      if (nextIsActive) return Math.min(prev, nextTimeLeft);
-      return nextTimeLeft;
-    });
+  useEffect(() => {
+    const resyncTimer = () => {
+      queryClient.invalidateQueries({ queryKey: [timerQueryKey] });
+    };
 
-    if (!samePhase) {
-      phaseEndAtRef.current = nextPhaseEndAt;
-    } else if (nextIsActive) {
-      phaseEndAtRef.current = phaseEndAtRef.current
-        ? Math.min(phaseEndAtRef.current, nextPhaseEndAt ?? phaseEndAtRef.current)
-        : nextPhaseEndAt;
-    } else {
-      phaseEndAtRef.current = nextPhaseEndAt;
-    }
-  }, [syncedTimer?.updatedAt, syncedTimer?.timeLeft, timerState, round]);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        resyncTimer();
+      }
+    };
+
+    window.addEventListener("focus", resyncTimer);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", resyncTimer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [timerQueryKey]);
 
   const resolveSoundType = (
     type: 'start-warmup' | 'start-game' | 'end-game' | 'final'
@@ -431,50 +494,6 @@ export default function Nonstop() {
   }, [isActive, timeLeft]);
 
   useEffect(() => {
-    if (isActive && timeLeft === 0) {
-      const completionKey = `${timerState}:${round}:${phaseEndAtRef.current ?? "no-phase-end"}`;
-      if (lastHandledPhaseCompletionRef.current === completionKey) {
-        return;
-      }
-      lastHandledPhaseCompletionRef.current = completionKey;
-      phaseEndAtRef.current = null;
-      if (timerState === 'warmup') {
-        // Warmup -> Game 1
-        beginPhase('game', gameMinutes * 60, 'start-game', true, 1);
-      } else if (timerState === 'game') {
-        if (round < totalRounds) {
-          // Game X -> Rest
-          playSound('end-game');
-          if (restMinutes > 0) {
-            beginPhase('rest', restMinutes * 60, undefined, true, round);
-          } else {
-            const nextRound = round + 1;
-            beginPhase('game', gameMinutes * 60, 'start-game', true, nextRound);
-          }
-        } else {
-          // Final Game -> End
-          setIsActive(false);
-          setTimerState('idle');
-          setTimeLeft(0);
-          syncTimer({
-            timerState: 'idle',
-            isActive: false,
-            round,
-            timeLeft: 0,
-            phaseEndsAt: null,
-          });
-          playSound('final');
-          toast({ title: "Non Stop Finalizado", description: "O torneio chegou ao fim!" });
-        }
-      } else if (timerState === 'rest') {
-        // Rest -> Game X+1
-        const nextRound = round + 1;
-        beginPhase('game', gameMinutes * 60, 'start-game', true, nextRound);
-      }
-    }
-  }, [isActive, timeLeft, timerState, round, gameMinutes, restMinutes, totalRounds]);
-
-  useEffect(() => {
     return () => {
       clearScheduledSounds();
     };
@@ -625,6 +644,7 @@ export default function Nonstop() {
 
   const createTeamMutation = useMutation({
     mutationFn: async (data: any) => {
+      if (readOnlyMode) return null;
       const res = await apiRequest("POST", "/api/teams", {
         ...data,
         name: normalizeTeamName(data.name || ""),
@@ -652,6 +672,7 @@ export default function Nonstop() {
 
   const updateTeamMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: any }) => {
+      if (readOnlyMode) return null;
       const res = await apiRequest("PATCH", `/api/teams/${id}`, {
         ...data,
         name: normalizeTeamName(data.name || ""),
@@ -668,6 +689,7 @@ export default function Nonstop() {
 
   const deleteTeamMutation = useMutation({
     mutationFn: async (id: number) => {
+      if (readOnlyMode) return;
       await apiRequest("DELETE", `/api/teams/${id}`);
     },
     onSuccess: async (_data, id) => {
@@ -697,12 +719,14 @@ export default function Nonstop() {
   };
 
   const onScoreChange = (roundNum: number, courtNum: number, field: "A" | "B", value: string) => {
+    if (readOnlyMode) return;
     const key = getScoreKey(roundNum, courtNum, field);
     const next = value.replace(/[^\d]/g, "");
     setScoreDrafts((prev) => ({ ...prev, [key]: next }));
   };
 
   const commitScore = (roundNum: number, courtNum: number, field: "A" | "B", matchResult?: NonstopResult) => {
+    if (readOnlyMode) return;
     const key = getScoreKey(roundNum, courtNum, field);
     const raw = scoreDrafts[key];
     if (raw === undefined) return;
@@ -747,6 +771,7 @@ export default function Nonstop() {
 
   const updateResultMutation = useMutation({
     mutationFn: async (data: any) => {
+      if (readOnlyMode) return null;
       if (!data.teamAId || !data.teamBId || data.teamAId < 1 || data.teamBId < 1) {
         return null;
       }
@@ -791,23 +816,32 @@ export default function Nonstop() {
     },
   });
 
-  const resetMutation = useMutation({
+  const finalizeAndStartMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/nonstop/reset");
+      const res = await apiRequest("POST", "/api/nonstop/finalize-and-start", {});
       return res.json();
     },
     onSuccess: () => {
       clearScheduledSounds();
+      setViewMode("current");
+      setSelectedHistoryEventId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/nonstop/current"] });
+      queryClient.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/nonstop/events"),
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
       queryClient.invalidateQueries({ queryKey: ["/api/results"] });
       queryClient.invalidateQueries({ queryKey: ["/api/nonstop/timer"] });
-      toast({ title: "Sucesso", description: "Torneio reiniciado" });
+      toast({ title: "Sucesso", description: "Evento finalizado e novo Non Stop iniciado" });
     }
   });
 
   const exportToExcel = async () => {
     try {
-      const res = await fetch("/api/nonstop/export");
+      const exportUrl = readOnlyMode
+        ? `/api/nonstop/export?eventId=${selectedHistoryEventId}`
+        : "/api/nonstop/export";
+      const res = await fetch(exportUrl, { credentials: "include" });
       const data = await res.json();
       
       const wb = XLSX.utils.book_new();
@@ -1150,6 +1184,10 @@ export default function Nonstop() {
   };
 
   const stats = getStandings();
+  const selectedEventTimeLabel = selectedHistoryEvent
+    ? format(new Date(selectedHistoryEvent.startedAt ?? selectedHistoryEvent.createdAt), "HH:mm")
+    : null;
+  const daysWithEvents = events.map((event) => new Date(event.startedAt ?? event.createdAt));
 
   return (
     <div
@@ -1171,6 +1209,88 @@ export default function Nonstop() {
         <h2 className={cn("text-3xl font-bold tracking-tight uppercase", isPresentationMode && "hidden")}>Nonstop {numCourts} Campos</h2>
         
         <div className="flex flex-wrap items-center gap-2">
+          <div className={cn("w-full sm:w-auto flex flex-wrap items-center gap-2", isPresentationMode && "hidden")}>
+            <ToggleGroup
+              type="single"
+              value={viewMode}
+              onValueChange={(value) => {
+                if (!value) return;
+                const nextMode = value as "current" | "history";
+                setViewMode(nextMode);
+                if (nextMode === "current") {
+                  setSelectedHistoryEventId(null);
+                  return;
+                }
+                const fallbackDay = historyDate ?? new Date();
+                setHistoryDate(fallbackDay);
+                const dayKey = format(fallbackDay, "yyyy-MM-dd");
+                const sameDay = events
+                  .filter((event) => format(new Date(event.startedAt ?? event.createdAt), "yyyy-MM-dd") === dayKey)
+                  .sort((a, b) => new Date(a.startedAt ?? a.createdAt).getTime() - new Date(b.startedAt ?? b.createdAt).getTime());
+                if (sameDay.length === 1) {
+                  setSelectedHistoryEventId(sameDay[0].id);
+                } else if (sameDay.length > 1) {
+                  setIsHistoryDrawerOpen(true);
+                }
+              }}
+            >
+              <ToggleGroupItem value="current" className="h-9 px-3 text-[11px]">
+                Atual
+              </ToggleGroupItem>
+              <ToggleGroupItem value="history" className="h-9 px-3 text-[11px]">
+                <History className="w-3.5 h-3.5 mr-1" />
+                Historico
+              </ToggleGroupItem>
+            </ToggleGroup>
+
+            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="h-9 px-3 text-[11px]">
+                  <CalendarIcon className="w-4 h-4 mr-1" />
+                  Calendario
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={historyDate}
+                  onSelect={(date) => {
+                    setHistoryDate(date);
+                    if (!date) return;
+                    if (viewMode !== "history") setViewMode("history");
+                    const dayKey = format(date, "yyyy-MM-dd");
+                    const sameDay = events
+                      .filter((event) => format(new Date(event.startedAt ?? event.createdAt), "yyyy-MM-dd") === dayKey)
+                      .sort((a, b) => new Date(a.startedAt ?? a.createdAt).getTime() - new Date(b.startedAt ?? b.createdAt).getTime());
+                    if (sameDay.length === 1) {
+                      setSelectedHistoryEventId(sameDay[0].id);
+                      setIsHistoryDrawerOpen(false);
+                      setIsCalendarOpen(false);
+                    } else if (sameDay.length > 1) {
+                      setSelectedHistoryEventId(null);
+                      setIsHistoryDrawerOpen(true);
+                      setIsCalendarOpen(false);
+                    } else {
+                      setSelectedHistoryEventId(null);
+                    }
+                  }}
+                  modifiers={{ hasEvents: daysWithEvents }}
+                  modifiersClassNames={{ hasEvents: "bg-orange-100 text-orange-700 font-semibold" }}
+                />
+              </PopoverContent>
+            </Popover>
+
+            {selectedEventTimeLabel ? (
+              <Badge variant="outline" className="h-9 px-2 text-[11px] border-orange-300 text-orange-700">
+                {selectedEventTimeLabel}
+              </Badge>
+            ) : null}
+            {viewMode === "history" && !selectedHistoryEventId ? (
+              <Badge variant="outline" className="h-9 px-2 text-[11px] border-slate-300 text-slate-600">
+                Seleciona um horario
+              </Badge>
+            ) : null}
+          </div>
           <Card className={cn(
             "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[420px]",
             isPresentationMode && "gap-2 px-3 py-1.5 sm:min-w-[360px] max-[900px]:gap-1.5 max-[900px]:px-2.5 max-[900px]:py-1",
@@ -1196,6 +1316,7 @@ export default function Nonstop() {
                 <Button
                   size="sm"
                   variant="outline"
+                  disabled={readOnlyMode}
                   className={cn("h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10", isPresentationMode && "h-7 text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:text-[8px] max-[900px]:px-1")}
                   onClick={() => {
                     beginPhase('game', gameMinutes * 60, 'start-game', true, 1);
@@ -1210,6 +1331,7 @@ export default function Nonstop() {
                 <Button
                   size="sm"
                   variant="outline"
+                  disabled={readOnlyMode}
                   className={cn("h-8 text-[10px] px-2 border-orange-500 text-orange-500 hover:bg-orange-500/10", isPresentationMode && "h-7 text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:text-[8px] max-[900px]:px-1")}
                   onClick={() => {
                     const nextRound = round + 1;
@@ -1223,7 +1345,7 @@ export default function Nonstop() {
 
               {!isActive ? (
                 <>
-                  <Button size="sm" className={cn("h-8 w-[130px] text-[10px] px-2 bg-orange-600 hover:bg-orange-500 justify-center", isPresentationMode && "h-7 w-[118px] text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:w-[108px] max-[900px]:text-[8px] max-[900px]:px-1")} onClick={() => {
+                  <Button size="sm" disabled={readOnlyMode} className={cn("h-8 w-[130px] text-[10px] px-2 bg-orange-600 hover:bg-orange-500 justify-center", isPresentationMode && "h-7 w-[118px] text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:w-[108px] max-[900px]:text-[8px] max-[900px]:px-1")} onClick={() => {
                     if (timeLeft > 0 && timerState !== 'idle') {
                       const nextPhaseEndAt = Date.now() + timeLeft * 1000;
                       phaseEndAtRef.current = nextPhaseEndAt;
@@ -1248,6 +1370,7 @@ export default function Nonstop() {
                   <Button
                     variant="default"
                     size="sm"
+                    disabled={readOnlyMode}
                     className={cn("order-2 h-8 w-[130px] px-3 text-[10px] border-orange-500 bg-orange-600 text-white hover:bg-orange-500 justify-center", isPresentationMode && "h-7 w-[118px] text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:w-[108px] max-[900px]:text-[8px] max-[900px]:px-1")}
                     onClick={() => {
                     const remaining = phaseEndAtRef.current
@@ -1274,6 +1397,7 @@ export default function Nonstop() {
                       <Button
                         variant="outline"
                         size="icon"
+                        disabled={readOnlyMode}
                         className={cn("order-1 h-8 w-8 border-red-500/60 text-red-500 hover:bg-red-500/10", isPresentationMode && "h-7 w-7 max-[900px]:h-6 max-[900px]:w-6")}
                         title="Parar cronómetro"
                         onClick={() => setConfirmStopPresentation(true)}
@@ -1293,6 +1417,7 @@ export default function Nonstop() {
                         <Button
                           variant="destructive"
                           size="sm"
+                          disabled={readOnlyMode}
                           className={cn("h-8 text-[10px] px-2", isPresentationMode && "h-7 text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:text-[8px] max-[900px]:px-1")}
                           onClick={stopTimer}
                         >
@@ -1308,6 +1433,7 @@ export default function Nonstop() {
                       <Button
                         variant="outline"
                         size="icon"
+                        disabled={readOnlyMode}
                         className="order-1 h-8 w-8 border-red-500/60 text-red-500 hover:bg-red-500/10"
                         title="Parar cronómetro"
                       >
@@ -1325,7 +1451,10 @@ export default function Nonstop() {
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
                         <AlertDialogAction
                           className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          onClick={stopTimer}
+                          onClick={() => {
+                            if (readOnlyMode) return;
+                            stopTimer();
+                          }}
                         >
                           Parar
                         </AlertDialogAction>
@@ -1394,18 +1523,20 @@ export default function Nonstop() {
           <div className={cn(isPresentationMode && "hidden")}>
             <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="outline" size="icon" className="text-destructive hover:bg-destructive/10">
-                <Trash2 className="w-4 h-4" />
+              <Button className="h-9 gap-2 bg-orange-600 text-white hover:bg-orange-500 px-3 text-[11px]" disabled={readOnlyMode}>
+                <Square className="w-4 h-4" />
+                <span className="hidden sm:inline">Finalizar e iniciar novo</span>
+                <span className="sm:hidden">Finalizar</span>
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Reiniciar Torneio?</AlertDialogTitle>
-                <AlertDialogDescription>Apagar todas as equipas e resultados? Esta ação não pode ser desfeita.</AlertDialogDescription>
+                <AlertDialogTitle>Finalizar evento atual?</AlertDialogTitle>
+                <AlertDialogDescription>O evento atual sera arquivado e um novo Non Stop vazio sera criado.</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                <AlertDialogAction onClick={() => resetMutation.mutate()} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Confirmar</AlertDialogAction>
+                <AlertDialogAction onClick={() => finalizeAndStartMutation.mutate()} className="bg-orange-600 text-white hover:bg-orange-500">Confirmar</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
             </AlertDialog>
@@ -1414,7 +1545,7 @@ export default function Nonstop() {
           <div className={cn(isPresentationMode && "hidden")}>
             <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="gap-2 bg-orange-600 text-white hover:bg-orange-500" disabled={(teams?.length || 0) >= numTeams}>
+              <Button className="gap-2 bg-orange-600 text-white hover:bg-orange-500 h-9" disabled={readOnlyMode || (teams?.length || 0) >= numTeams}>
                 <Plus className="w-4 h-4" /> Adicionar dupla
               </Button>
             </DialogTrigger>
@@ -1428,7 +1559,7 @@ export default function Nonstop() {
           <div className={cn(isPresentationMode && "hidden")}>
             <Dialog open={isManageTeamsOpen} onOpenChange={setIsManageTeamsOpen}>
             <DialogTrigger asChild>
-              <Button className="gap-2 bg-orange-600 text-white hover:bg-orange-500">
+              <Button className="gap-2 bg-orange-600 text-white hover:bg-orange-500 h-9" disabled={readOnlyMode}>
                 <Edit2 className="w-4 h-4" /> Gerir duplas
               </Button>
             </DialogTrigger>
@@ -1583,9 +1714,12 @@ export default function Nonstop() {
                           <TableCell className={cn("w-[34%] max-w-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Select 
                               value={matchResult?.teamAId?.toString()} 
-                              onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamAId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamBId: matchResult?.teamBId ?? 0 })}
+                              onValueChange={(val) => {
+                                if (readOnlyMode) return;
+                                updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamAId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamBId: matchResult?.teamBId ?? 0 });
+                              }}
                             >
-                              <SelectTrigger className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
+                              <SelectTrigger disabled={readOnlyMode} className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1597,6 +1731,7 @@ export default function Nonstop() {
                             <Input 
                               type="text"
                               inputMode="numeric"
+                              disabled={readOnlyMode}
                               className={cn("border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7 max-[900px]:text-[9px] max-[900px]:h-3.5 max-[900px]:w-6")}
                               value={getScoreValue(roundNum, courtNum, "A", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "A", e.target.value)}
@@ -1613,6 +1748,7 @@ export default function Nonstop() {
                             <Input 
                               type="text"
                               inputMode="numeric"
+                              disabled={readOnlyMode}
                               className={cn("border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7 max-[900px]:text-[9px] max-[900px]:h-3.5 max-[900px]:w-6")}
                               value={getScoreValue(roundNum, courtNum, "B", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "B", e.target.value)}
@@ -1627,9 +1763,12 @@ export default function Nonstop() {
                           <TableCell className={cn("w-[34%] max-w-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Select 
                               value={matchResult?.teamBId?.toString()} 
-                              onValueChange={(val) => updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamBId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamAId: matchResult?.teamAId ?? 0 })}
+                              onValueChange={(val) => {
+                                if (readOnlyMode) return;
+                                updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamBId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamAId: matchResult?.teamAId ?? 0 });
+                              }}
                             >
-                              <SelectTrigger className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
+                              <SelectTrigger disabled={readOnlyMode} className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1648,6 +1787,35 @@ export default function Nonstop() {
         })}
       </div>
       </div>
+
+      <Drawer open={isHistoryDrawerOpen} onOpenChange={setIsHistoryDrawerOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Selecionar Non Stop</DrawerTitle>
+          </DrawerHeader>
+          <div className="px-4 pb-4 space-y-2">
+            {eventsForSelectedDate.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nao ha eventos neste dia.</p>
+            ) : (
+              eventsForSelectedDate.map((event) => (
+                <Button
+                  key={event.id}
+                  variant={selectedHistoryEventId === event.id ? "default" : "outline"}
+                  className="w-full justify-between"
+                  onClick={() => {
+                    setSelectedHistoryEventId(event.id);
+                    setViewMode("history");
+                    setIsHistoryDrawerOpen(false);
+                  }}
+                >
+                  <span>{event.label || "Non Stop"}</span>
+                  <span>{format(new Date(event.startedAt ?? event.createdAt), "HH:mm")}</span>
+                </Button>
+              ))
+            )}
+          </div>
+        </DrawerContent>
+      </Drawer>
 
       <Dialog open={!!editingTeam} onOpenChange={() => setEditingTeam(null)}>
         <DialogContent>

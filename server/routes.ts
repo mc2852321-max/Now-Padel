@@ -40,6 +40,99 @@ const timerSyncSchema = z.object({
   phaseEndsAt: z.string().datetime().nullable().optional(),
 });
 
+const finalizeAndStartSchema = z.object({
+  label: z.string().max(120).optional(),
+});
+
+function parseEventId(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) return undefined;
+  return parsed;
+}
+
+function toPhaseEndAt(seconds: number): Date {
+  return new Date(Date.now() + Math.max(0, seconds) * 1000);
+}
+
+async function resolveNonstopTimerState() {
+  let timer = await storage.getNonstopTimer();
+  const settings = await storage.getSettings();
+  const gameSeconds = Math.max(0, Math.floor((settings.gameTime ?? 20) * 60));
+  const restSeconds = Math.max(0, Math.floor((settings.restTime ?? 2) * 60));
+  const totalRounds = Math.max(1, settings.nonstopRounds ?? 5);
+  const maxTransitions = 20;
+  let transitions = 0;
+
+  while (
+    Boolean(timer.isActive) &&
+    timer.phaseEndsAt &&
+    new Date(timer.phaseEndsAt).getTime() <= Date.now() &&
+    transitions < maxTransitions
+  ) {
+    transitions += 1;
+
+    if (timer.timerState === "warmup") {
+      timer = await storage.updateNonstopTimer({
+        timerState: "game",
+        isActive: 1,
+        round: 1,
+        timeLeft: gameSeconds,
+        phaseEndsAt: toPhaseEndAt(gameSeconds),
+      });
+      continue;
+    }
+
+    if (timer.timerState === "game") {
+      if (timer.round < totalRounds) {
+        if (restSeconds > 0) {
+          timer = await storage.updateNonstopTimer({
+            timerState: "rest",
+            isActive: 1,
+            round: timer.round,
+            timeLeft: restSeconds,
+            phaseEndsAt: toPhaseEndAt(restSeconds),
+          });
+          continue;
+        }
+
+        timer = await storage.updateNonstopTimer({
+          timerState: "game",
+          isActive: 1,
+          round: timer.round + 1,
+          timeLeft: gameSeconds,
+          phaseEndsAt: toPhaseEndAt(gameSeconds),
+        });
+        continue;
+      }
+
+      timer = await storage.updateNonstopTimer({
+        timerState: "idle",
+        isActive: 0,
+        round: timer.round,
+        timeLeft: 0,
+        phaseEndsAt: null,
+      });
+      break;
+    }
+
+    if (timer.timerState === "rest") {
+      timer = await storage.updateNonstopTimer({
+        timerState: "game",
+        isActive: 1,
+        round: timer.round + 1,
+        timeLeft: gameSeconds,
+        phaseEndsAt: toPhaseEndAt(gameSeconds),
+      });
+      continue;
+    }
+
+    break;
+  }
+
+  return timer;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -260,8 +353,56 @@ export async function registerRoutes(
     res.status(204).end();
   });
 
+  app.get("/api/nonstop/current", isAuthenticated, async (_req, res) => {
+    const event = await storage.getCurrentNonstopEvent();
+    res.json(event);
+  });
+
+  app.get("/api/nonstop/events", isAuthenticated, async (req, res) => {
+    const from = typeof req.query.from === "string" ? new Date(req.query.from) : undefined;
+    const to = typeof req.query.to === "string" ? new Date(req.query.to) : undefined;
+    const events = await storage.listNonstopEvents({
+      from: from && !Number.isNaN(from.getTime()) ? from : undefined,
+      to: to && !Number.isNaN(to.getTime()) ? to : undefined,
+    });
+    res.json(events);
+  });
+
+  app.get("/api/nonstop/events/:id", isAuthenticated, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ message: "Invalid event id" });
+    }
+    const details = await storage.getNonstopEventDetails(id);
+    if (!details) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+    res.json(details);
+  });
+
+  app.post("/api/nonstop/finalize-and-start", isAuthenticated, async (req, res) => {
+    try {
+      const input = finalizeAndStartSchema.parse(req.body ?? {});
+      const userEmail = (req.session as any)?.userEmail ?? null;
+      const result = await storage.finalizeAndStartNonstop({
+        label: input.label,
+        userEmail,
+      });
+      res.json({ success: true, ...result });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join("."),
+        });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/teams", isAuthenticated, async (_req, res) => {
-    const teams = await storage.getTeams();
+    const eventId = parseEventId(_req.query.eventId);
+    const teams = await storage.getTeams(eventId);
     res.json(teams);
   });
 
@@ -309,7 +450,8 @@ export async function registerRoutes(
   });
 
   app.get("/api/results", isAuthenticated, async (_req, res) => {
-    const results = await storage.getResults();
+    const eventId = parseEventId(_req.query.eventId);
+    const results = await storage.getResults(eventId);
     res.json(results);
   });
 
@@ -338,10 +480,11 @@ export async function registerRoutes(
   });
 
   app.get("/api/nonstop/timer", isAuthenticated, async (_req, res) => {
-    const timer = await storage.getNonstopTimer();
+    const eventId = parseEventId(_req.query.eventId);
+    const timer = eventId ? await storage.getNonstopTimer(eventId) : await resolveNonstopTimerState();
     let liveTimeLeft = timer.timeLeft;
 
-    if (timer.isActive && timer.phaseEndsAt) {
+    if (!eventId && timer.isActive && timer.phaseEndsAt) {
       liveTimeLeft = Math.max(
         0,
         Math.ceil((new Date(timer.phaseEndsAt).getTime() - Date.now()) / 1000),
@@ -358,7 +501,7 @@ export async function registerRoutes(
   app.post("/api/nonstop/timer", isAuthenticated, async (req, res) => {
     try {
       const input = timerSyncSchema.parse(req.body);
-      const updated = await storage.updateNonstopTimer({
+      await storage.updateNonstopTimer({
         timerState: input.timerState,
         isActive: input.isActive === undefined ? undefined : (input.isActive ? 1 : 0),
         round: input.round,
@@ -369,6 +512,7 @@ export async function registerRoutes(
             ? null
             : new Date(input.phaseEndsAt),
       });
+      const updated = await resolveNonstopTimerState();
 
       res.json({
         ...updated,
@@ -385,14 +529,16 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/nonstop/reset", isAuthenticated, async (_req, res) => {
-    await storage.resetNonstop();
-    res.json({ success: true });
+  app.post("/api/nonstop/reset", isAuthenticated, async (req, res) => {
+    const userEmail = (req.session as any)?.userEmail ?? null;
+    const result = await storage.finalizeAndStartNonstop({ userEmail });
+    res.json({ success: true, ...result });
   });
 
   app.get("/api/nonstop/export", isAuthenticated, async (_req, res) => {
-    const teams = await storage.getTeams();
-    const results = await storage.getResults();
+    const eventId = parseEventId(_req.query.eventId);
+    const teams = await storage.getTeams(eventId);
+    const results = await storage.getResults(eventId);
     const settings = await storage.getSettings();
     
     const numRounds = settings?.nonstopRounds || 5;
@@ -448,22 +594,23 @@ export async function registerRoutes(
       }
     });
 
+    const tieBreaker = settings?.tieBreaker === "diff" ? "diff" : "direct";
     const sortedStandings = Object.values(standings).sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
 
-      // 1º critério de desempate: confronto direto
-      const directMatch = results.find(r =>
-        (r.teamAId === a.teamId && r.teamBId === b.teamId) ||
-        (r.teamAId === b.teamId && r.teamBId === a.teamId)
-      );
+      if (tieBreaker === "direct") {
+        const directMatch = results.find(r =>
+          (r.teamAId === a.teamId && r.teamBId === b.teamId) ||
+          (r.teamAId === b.teamId && r.teamBId === a.teamId)
+        );
 
-      if (directMatch && directMatch.scoreA !== null && directMatch.scoreB !== null) {
-        const aScore = directMatch.teamAId === a.teamId ? directMatch.scoreA : directMatch.scoreB;
-        const bScore = directMatch.teamAId === b.teamId ? directMatch.scoreA : directMatch.scoreB;
-        if (aScore !== bScore) return bScore - aScore;
+        if (directMatch && directMatch.scoreA !== null && directMatch.scoreB !== null) {
+          const aScore = directMatch.teamAId === a.teamId ? directMatch.scoreA : directMatch.scoreB;
+          const bScore = directMatch.teamAId === b.teamId ? directMatch.scoreA : directMatch.scoreB;
+          if (aScore !== bScore) return bScore - aScore;
+        }
       }
 
-      // 2º critério de desempate: diferença jogos ganhos vs perdidos
       const diffA = a.gamesWon - a.gamesLost;
       const diffB = b.gamesWon - b.gamesLost;
       return diffB - diffA;
@@ -578,8 +725,27 @@ export async function registerRoutes(
     `);
 
     await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS nonstop_events (
+        id SERIAL PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'active',
+        label TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        started_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        finalized_by TEXT,
+        created_by TEXT,
+        snapshot TEXT
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_nonstop_events_created_at ON nonstop_events (created_at DESC)
+    `);
+
+    await db.execute(sql`
       CREATE TABLE IF NOT EXISTS nonstop_results (
         id SERIAL PRIMARY KEY,
+        event_id INTEGER,
         team_a_id INTEGER NOT NULL,
         team_b_id INTEGER NOT NULL,
         score_a INTEGER NOT NULL,
@@ -593,6 +759,7 @@ export async function registerRoutes(
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS nonstop_timer (
         id SERIAL PRIMARY KEY,
+        event_id INTEGER,
         timer_state TEXT NOT NULL DEFAULT 'idle',
         is_active INTEGER NOT NULL DEFAULT 0,
         round INTEGER NOT NULL DEFAULT 1,
@@ -600,6 +767,21 @@ export async function registerRoutes(
         phase_ends_at TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       )
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE teams
+      ADD COLUMN IF NOT EXISTS event_id INTEGER
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE nonstop_results
+      ADD COLUMN IF NOT EXISTS event_id INTEGER
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE nonstop_timer
+      ADD COLUMN IF NOT EXISTS event_id INTEGER
     `);
 
     await db.execute(sql`
@@ -630,6 +812,43 @@ export async function registerRoutes(
     await db.execute(sql`
       ALTER TABLE nonstop_timer
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    `);
+
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_teams_event_id ON teams (event_id)
+    `);
+
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_results_event_round_court ON nonstop_results (event_id, round, court)
+    `);
+
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_timer_event_id ON nonstop_timer (event_id)
+    `);
+
+    await db.execute(sql`
+      DO $$
+      DECLARE active_event_id INTEGER;
+      BEGIN
+        SELECT id INTO active_event_id
+        FROM nonstop_events
+        WHERE status = 'active'
+        ORDER BY id DESC
+        LIMIT 1;
+
+        IF active_event_id IS NULL THEN
+          INSERT INTO nonstop_events(status) VALUES ('active') RETURNING id INTO active_event_id;
+        END IF;
+
+        UPDATE teams SET event_id = active_event_id WHERE event_id IS NULL;
+        UPDATE nonstop_results SET event_id = active_event_id WHERE event_id IS NULL;
+        UPDATE nonstop_timer SET event_id = active_event_id WHERE event_id IS NULL;
+
+        IF NOT EXISTS (SELECT 1 FROM nonstop_timer WHERE event_id = active_event_id) THEN
+          INSERT INTO nonstop_timer(event_id) VALUES (active_event_id);
+        END IF;
+      END
+      $$;
     `);
 
     await db.execute(sql`
@@ -715,6 +934,7 @@ export async function registerRoutes(
       await storage.createPlayer({ name: "Pedro Costa", phone: "934567890", level: "M4", notes: "Jogador regular" });
       await storage.createPlayer({ name: "Ana Oliveira", phone: "961234567", level: "F6", notes: "Nível de competição" });
     }
+    await storage.purgeOldNonstopEvents(90);
   } catch (error) {
     console.error("[startup] skipping seed data:", error);
   }

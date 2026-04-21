@@ -59,6 +59,13 @@ function normalizeTeamName(name: string) {
   return name.replace(/\s+/g, " ").trim();
 }
 
+function toLisbonDayKey(dateLike: Date | string | null | undefined) {
+  if (!dateLike) return "";
+  const value = new Date(dateLike);
+  if (Number.isNaN(value.getTime())) return "";
+  return value.toLocaleDateString("sv-SE", { timeZone: "Europe/Lisbon" });
+}
+
 export default function Nonstop() {
   const { toast } = useToast();
   const [viewMode, setViewMode] = useState<"current" | "history">("current");
@@ -151,16 +158,20 @@ export default function Nonstop() {
   const warmupMinutes = settings?.warmupTime ?? 0;
   const gameMinutes = settings?.gameTime ?? 20;
   const totalRounds = settings?.nonstopRounds ?? 5;
-  const eventsForSelectedDate = useMemo(() => {
-    if (!historyDate) return [];
-    const dayKey = format(historyDate, "yyyy-MM-dd");
+  const getEventsByDate = (date?: Date) => {
+    if (!date) return [];
+    const dayKey = toLisbonDayKey(date);
     return events
-      .filter((event) => format(new Date(event.startedAt ?? event.createdAt), "yyyy-MM-dd") === dayKey)
+      .filter((event) => toLisbonDayKey(event.startedAt ?? event.createdAt) === dayKey)
       .sort((a, b) => {
         const aTime = new Date(a.startedAt ?? a.createdAt).getTime();
         const bTime = new Date(b.startedAt ?? b.createdAt).getTime();
         return aTime - bTime;
       });
+  };
+
+  const eventsForSelectedDate = useMemo(() => {
+    return getEventsByDate(historyDate);
   }, [events, historyDate]);
 
   useEffect(() => {
@@ -1223,14 +1234,13 @@ export default function Nonstop() {
                 }
                 const fallbackDay = historyDate ?? new Date();
                 setHistoryDate(fallbackDay);
-                const dayKey = format(fallbackDay, "yyyy-MM-dd");
-                const sameDay = events
-                  .filter((event) => format(new Date(event.startedAt ?? event.createdAt), "yyyy-MM-dd") === dayKey)
-                  .sort((a, b) => new Date(a.startedAt ?? a.createdAt).getTime() - new Date(b.startedAt ?? b.createdAt).getTime());
+                const sameDay = getEventsByDate(fallbackDay);
                 if (sameDay.length === 1) {
                   setSelectedHistoryEventId(sameDay[0].id);
                 } else if (sameDay.length > 1) {
                   setIsHistoryDrawerOpen(true);
+                } else {
+                  setSelectedHistoryEventId(null);
                 }
               }}
             >
@@ -1258,10 +1268,7 @@ export default function Nonstop() {
                     setHistoryDate(date);
                     if (!date) return;
                     if (viewMode !== "history") setViewMode("history");
-                    const dayKey = format(date, "yyyy-MM-dd");
-                    const sameDay = events
-                      .filter((event) => format(new Date(event.startedAt ?? event.createdAt), "yyyy-MM-dd") === dayKey)
-                      .sort((a, b) => new Date(a.startedAt ?? a.createdAt).getTime() - new Date(b.startedAt ?? b.createdAt).getTime());
+                    const sameDay = getEventsByDate(date);
                     if (sameDay.length === 1) {
                       setSelectedHistoryEventId(sameDay[0].id);
                       setIsHistoryDrawerOpen(false);
@@ -1272,6 +1279,12 @@ export default function Nonstop() {
                       setIsCalendarOpen(false);
                     } else {
                       setSelectedHistoryEventId(null);
+                      setIsHistoryDrawerOpen(false);
+                      setIsCalendarOpen(false);
+                      toast({
+                        title: "Sem eventos neste dia",
+                        description: "Escolhe outro dia no calendario para ver historico.",
+                      });
                     }
                   }}
                   modifiers={{ hasEvents: daysWithEvents }}
@@ -1287,7 +1300,7 @@ export default function Nonstop() {
             ) : null}
             {viewMode === "history" && !selectedHistoryEventId ? (
               <Badge variant="outline" className="h-9 px-2 text-[11px] border-slate-300 text-slate-600">
-                Seleciona um horario
+                {eventsForSelectedDate.length === 0 ? "Sem eventos neste dia" : "Seleciona um horario"}
               </Badge>
             ) : null}
           </div>

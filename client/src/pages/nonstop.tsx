@@ -74,16 +74,6 @@ export default function Nonstop() {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] = useState(false);
 
-  const historyWindow = useMemo(() => {
-    const now = new Date();
-    const from = new Date(now);
-    from.setDate(now.getDate() - 90);
-    return {
-      fromIso: from.toISOString(),
-      toIso: now.toISOString(),
-    };
-  }, []);
-
   const { data: currentEvent } = useQuery<NonstopEventSummary>({
     queryKey: ["/api/nonstop/current"],
     refetchInterval: 3000,
@@ -91,7 +81,7 @@ export default function Nonstop() {
   });
 
   const { data: events = [] } = useQuery<NonstopEventSummary[]>({
-    queryKey: [`/api/nonstop/events?from=${encodeURIComponent(historyWindow.fromIso)}&to=${encodeURIComponent(historyWindow.toIso)}`],
+    queryKey: ["/api/nonstop/events"],
     refetchInterval: 5000,
     refetchOnWindowFocus: true,
   });
@@ -1299,7 +1289,7 @@ export default function Nonstop() {
                       setIsCalendarOpen(false);
                       toast({
                         title: "Sem eventos neste dia",
-                        description: "Escolhe outro dia no calendario para ver historico.",
+                        description: "Escolhe outro dia no calendário para ver histórico.",
                       });
                     }
                   }}

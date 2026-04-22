@@ -1230,6 +1230,8 @@ export default function Nonstop() {
                 setViewMode(nextMode);
                 if (nextMode === "current") {
                   setSelectedHistoryEventId(null);
+                  setIsCalendarOpen(false);
+                  setIsHistoryDrawerOpen(false);
                   return;
                 }
                 const fallbackDay = historyDate ?? new Date();
@@ -1249,15 +1251,29 @@ export default function Nonstop() {
               </ToggleGroupItem>
               <ToggleGroupItem value="history" className="h-9 px-3 text-[11px]">
                 <History className="w-3.5 h-3.5 mr-1" />
-                Historico
+                Histórico
               </ToggleGroupItem>
             </ToggleGroup>
 
-            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+            <Popover
+              open={isCalendarOpen}
+              onOpenChange={(open) => {
+                if (viewMode !== "history") {
+                  setIsCalendarOpen(false);
+                  return;
+                }
+                setIsCalendarOpen(open);
+              }}
+            >
               <PopoverTrigger asChild>
-                <Button variant="outline" className="h-9 px-3 text-[11px]">
+                <Button
+                  variant="outline"
+                  className="h-9 px-3 text-[11px]"
+                  disabled={viewMode !== "history"}
+                  title={viewMode !== "history" ? "Ativa o modo Histórico para usar o calendário" : "Calendário"}
+                >
                   <CalendarIcon className="w-4 h-4 mr-1" />
-                  Calendario
+                  Calendário
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">

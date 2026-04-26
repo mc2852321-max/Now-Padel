@@ -1727,6 +1727,11 @@ export default function Nonstop() {
                     {Array.from({ length: numCourts }).map((_, cIdx) => {
                       const courtNum = cIdx + 1;
                       const matchResult = results?.find(res => res.round === roundNum && res.court === courtNum);
+                      const scoreA = typeof matchResult?.scoreA === "number" ? matchResult.scoreA : null;
+                      const scoreB = typeof matchResult?.scoreB === "number" ? matchResult.scoreB : null;
+                      const hasPlayed = scoreA !== null && scoreB !== null && (scoreA > 0 || scoreB > 0);
+                      const isTeamAWinner = hasPlayed && scoreA > scoreB;
+                      const isTeamBWinner = hasPlayed && scoreB > scoreA;
                       return (
                         <TableRow key={courtNum} className={cn("h-7", isPresentationMode && "h-6 max-[900px]:h-5")}>
                           <TableCell className={cn("font-np-num text-center text-[11px] font-bold bg-slate-50 border-r px-1 py-1", isPresentationMode && "text-[10px] py-0.5 max-[900px]:text-[9px] max-[900px]:py-0")}>{courtNum}</TableCell>
@@ -1738,7 +1743,7 @@ export default function Nonstop() {
                                 updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamAId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamBId: matchResult?.teamBId ?? 0 });
                               }}
                             >
-                              <SelectTrigger disabled={readOnlyMode} className={cn("font-np-body w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:text-left [&>span]:truncate", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
+                              <SelectTrigger disabled={readOnlyMode} className={cn("font-np-body w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:text-left [&>span]:truncate", isTeamAWinner && "font-bold", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1787,7 +1792,7 @@ export default function Nonstop() {
                                 updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamBId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamAId: matchResult?.teamAId ?? 0 });
                               }}
                             >
-                              <SelectTrigger disabled={readOnlyMode} className={cn("font-np-body w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:text-left [&>span]:truncate", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
+                              <SelectTrigger disabled={readOnlyMode} className={cn("font-np-body w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:text-left [&>span]:truncate", isTeamBWinner && "font-bold", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>

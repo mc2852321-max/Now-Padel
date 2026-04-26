@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Barlow:wght@500;600;700&family=Barlow+Condensed:wght@600;700&family=JetBrains+Mono:wght@600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -66,6 +68,9 @@ input::-webkit-password-toggle {
   --chart-3: 197 37% 24%;
   --chart-4: 43 74% 66%;
   --chart-5: 27 87% 67%;
+  --font-np-head: "Barlow Condensed", "Barlow", "Segoe UI", sans-serif;
+  --font-np-body: "Barlow", "Segoe UI", sans-serif;
+  --font-np-num: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --shadow-lg: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 4px 6px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
   --shadow-xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 8px 10px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
   --shadow-2xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00);
@@ -216,6 +221,19 @@ input::-webkit-password-toggle {
  * need to be distinguished from eachother visually.
  */
 @layer utilities {
+  .font-np-head {
+    font-family: var(--font-np-head);
+    letter-spacing: 0.02em;
+  }
+
+  .font-np-body {
+    font-family: var(--font-np-body);
+  }
+
+  .font-np-num {
+    font-family: var(--font-np-num);
+    font-variant-numeric: tabular-nums;
+  }
 
   /* Hide ugly search cancel button in Chrome until we can style it properly */
   input[type="search"]::-webkit-search-cancel-button {

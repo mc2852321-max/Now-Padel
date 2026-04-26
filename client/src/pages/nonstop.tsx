@@ -1661,11 +1661,11 @@ export default function Nonstop() {
         <div className={cn("pt-1 2xl:sticky 2xl:top-0 2xl:z-50", isPresentationMode && "pt-0")}>
           <Card className="overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-xl">
             <CardHeader className={cn("bg-slate-900 text-white py-1.5 px-2.5", isPresentationMode && "py-0.5 px-2 max-[900px]:py-0")}>
-              <CardTitle className={cn("text-sm uppercase tracking-widest text-center", isPresentationMode && "text-[10px] max-[900px]:text-[9px]")}>Classificação Geral</CardTitle>
+              <CardTitle className={cn("font-np-head text-sm uppercase tracking-widest text-center", isPresentationMode && "text-[10px] max-[900px]:text-[9px]")}>Classificação Geral</CardTitle>
             </CardHeader>
             <CardContent className={cn("p-0 max-h-[30vh] overflow-auto bg-slate-100", isPresentationMode && "max-h-none overflow-visible")}>
               <Table>
-                <TableHeader className="bg-orange-600 text-white">
+                <TableHeader className="font-np-head bg-orange-600 text-white">
                   <TableRow className={cn("hover:bg-orange-600 h-6", isPresentationMode && "h-5 max-[900px]:h-[18px]")}>
                     <TableHead className={cn("h-6 text-white font-bold uppercase text-[10px] leading-none py-0.5 px-2 min-w-[200px]", isPresentationMode && "h-5 text-[9px] py-0 px-1.5 max-[900px]:text-[8px]")}>Duplas</TableHead>
                     {Array.from({ length: numRounds }).map((_, i) => (
@@ -1677,13 +1677,13 @@ export default function Nonstop() {
                     <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 w-16", isPresentationMode && "h-5 text-[9px] py-0 w-14 max-[900px]:text-[8px]")}>Pontos</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+                <TableBody className="font-np-body">
                   {stats.map((s: any) => (
                     <TableRow key={s.teamId} className={cn("hover:bg-slate-50 h-7", isPresentationMode && "h-5 max-[900px]:h-[18px]")}>
-                      <TableCell className={cn("font-medium py-1 px-2 text-[11px] leading-tight whitespace-normal break-words", isPresentationMode && "py-0 text-[9px] max-[900px]:text-[8px]")}>{normalizeTeamName(s.name)}</TableCell>
+                      <TableCell className={cn("font-np-body font-medium py-1 px-2 text-[11px] leading-tight whitespace-normal break-words", isPresentationMode && "py-0 text-[9px] max-[900px]:text-[8px]")}>{normalizeTeamName(s.name)}</TableCell>
                       {s.sequence.map((char: string, i: number) => (
                         <TableCell key={i} className={cn(
-                          "text-center text-[11px] font-bold border-l w-16 py-1",
+                          "font-np-head text-center text-[11px] font-bold border-l w-16 py-1",
                           isPresentationMode && "text-[9px] w-14 py-0",
                           char === 'V' ? "bg-green-100 text-green-700" :
                           char === 'D' ? "bg-red-100 text-red-700" : 
@@ -1692,10 +1692,10 @@ export default function Nonstop() {
                           {char}
                         </TableCell>
                       ))}
-                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesWon}</TableCell>
-                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesLost}</TableCell>
-                      <TableCell className={cn("text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesWon - s.gamesLost}</TableCell>
-                      <TableCell className={cn("text-center text-[11px] font-bold border-l bg-slate-50 w-16 py-1", isPresentationMode && "text-[9px] w-14 py-0")}>{s.points}</TableCell>
+                      <TableCell className={cn("font-np-num text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesWon}</TableCell>
+                      <TableCell className={cn("font-np-num text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesLost}</TableCell>
+                      <TableCell className={cn("font-np-num text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesWon - s.gamesLost}</TableCell>
+                      <TableCell className={cn("font-np-num text-center text-[11px] font-bold border-l bg-slate-50 w-16 py-1", isPresentationMode && "text-[9px] w-14 py-0")}>{s.points}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1709,11 +1709,11 @@ export default function Nonstop() {
           return (
             <Card key={roundNum} className="overflow-hidden border-2 border-orange-600">
               <CardHeader className={cn("bg-orange-600 text-white py-1 text-center", isPresentationMode && "py-0.5")}>
-                <CardTitle className={cn("text-[10px] uppercase tracking-widest", isPresentationMode && "text-[9px]")}>Ronda {roundNum}</CardTitle>
+                <CardTitle className={cn("font-np-head text-[10px] uppercase tracking-widest", isPresentationMode && "text-[9px]")}>Ronda {roundNum}</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
-                  <TableHeader className="bg-slate-100">
+                  <TableHeader className="font-np-head bg-slate-100">
                     <TableRow className={cn("hover:bg-slate-100 h-6", isPresentationMode && "h-5")}>
                       <TableHead className={cn("h-6 w-9 text-center font-bold text-[10px] leading-none px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>CAMPO</TableHead>
                       <TableHead className={cn("h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>EQUIPA A</TableHead>
@@ -1723,13 +1723,13 @@ export default function Nonstop() {
                       <TableHead className={cn("h-6 font-bold text-[10px] leading-none w-[34%] px-1 py-0.5", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>EQUIPA B</TableHead>
                     </TableRow>
                   </TableHeader>
-                  <TableBody>
+                  <TableBody className="font-np-body">
                     {Array.from({ length: numCourts }).map((_, cIdx) => {
                       const courtNum = cIdx + 1;
                       const matchResult = results?.find(res => res.round === roundNum && res.court === courtNum);
                       return (
                         <TableRow key={courtNum} className={cn("h-7", isPresentationMode && "h-6 max-[900px]:h-5")}>
-                          <TableCell className={cn("text-center text-[11px] font-bold bg-slate-50 border-r px-1 py-1", isPresentationMode && "text-[10px] py-0.5 max-[900px]:text-[9px] max-[900px]:py-0")}>{courtNum}</TableCell>
+                          <TableCell className={cn("font-np-num text-center text-[11px] font-bold bg-slate-50 border-r px-1 py-1", isPresentationMode && "text-[10px] py-0.5 max-[900px]:text-[9px] max-[900px]:py-0")}>{courtNum}</TableCell>
                           <TableCell className={cn("w-[34%] max-w-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Select 
                               value={matchResult?.teamAId?.toString()} 
@@ -1738,11 +1738,11 @@ export default function Nonstop() {
                                 updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamAId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamBId: matchResult?.teamBId ?? 0 });
                               }}
                             >
-                              <SelectTrigger disabled={readOnlyMode} className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
+                              <SelectTrigger disabled={readOnlyMode} className={cn("font-np-body w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:text-left [&>span]:truncate", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
-                                {teams?.map(t => <SelectItem key={t.id} value={t.id.toString()}>{normalizeTeamName(t.name)}</SelectItem>)}
+                                {teams?.map(t => <SelectItem className="font-np-body" key={t.id} value={t.id.toString()}>{normalizeTeamName(t.name)}</SelectItem>)}
                               </SelectContent>
                             </Select>
                           </TableCell>
@@ -1751,7 +1751,7 @@ export default function Nonstop() {
                               type="text"
                               inputMode="numeric"
                               disabled={readOnlyMode}
-                              className={cn("border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7 max-[900px]:text-[9px] max-[900px]:h-3.5 max-[900px]:w-6")}
+                              className={cn("font-np-num border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7 max-[900px]:text-[9px] max-[900px]:h-3.5 max-[900px]:w-6")}
                               value={getScoreValue(roundNum, courtNum, "A", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "A", e.target.value)}
                               onBlur={() => commitScore(roundNum, courtNum, "A", matchResult)}
@@ -1762,13 +1762,13 @@ export default function Nonstop() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className={cn("text-center text-[10px] text-muted-foreground bg-slate-50 border-x py-1", isPresentationMode && "text-[9px] py-0.5 max-[900px]:text-[8px] max-[900px]:py-0")}>vs</TableCell>
+                          <TableCell className={cn("font-np-head text-center text-[10px] text-muted-foreground bg-slate-50 border-x py-1", isPresentationMode && "text-[9px] py-0.5 max-[900px]:text-[8px] max-[900px]:py-0")}>vs</TableCell>
                           <TableCell className={cn("p-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Input 
                               type="text"
                               inputMode="numeric"
                               disabled={readOnlyMode}
-                              className={cn("border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7 max-[900px]:text-[9px] max-[900px]:h-3.5 max-[900px]:w-6")}
+                              className={cn("font-np-num border-none text-center text-[11px] font-bold focus-visible:ring-0 h-5 w-8 mx-auto px-0", isPresentationMode && "text-[10px] h-4 w-7 max-[900px]:text-[9px] max-[900px]:h-3.5 max-[900px]:w-6")}
                               value={getScoreValue(roundNum, courtNum, "B", matchResult)}
                               onChange={(e) => onScoreChange(roundNum, courtNum, "B", e.target.value)}
                               onBlur={() => commitScore(roundNum, courtNum, "B", matchResult)}
@@ -1787,11 +1787,11 @@ export default function Nonstop() {
                                 updateResultMutation.mutate({ ...matchResult, round: roundNum, court: courtNum, teamBId: parseInt(val), scoreA: matchResult?.scoreA ?? 0, scoreB: matchResult?.scoreB ?? 0, teamAId: matchResult?.teamAId ?? 0 });
                               }}
                             >
-                              <SelectTrigger disabled={readOnlyMode} className={cn("w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
+                              <SelectTrigger disabled={readOnlyMode} className={cn("font-np-body w-full min-w-0 border-none shadow-none focus:ring-0 h-6 text-[10px] px-1.5 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:text-left [&>span]:truncate", isPresentationMode && "h-5 text-[9px] px-1 max-[900px]:h-4 max-[900px]:text-[8px]")}>
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
-                                {teams?.map(t => <SelectItem key={t.id} value={t.id.toString()}>{normalizeTeamName(t.name)}</SelectItem>)}
+                                {teams?.map(t => <SelectItem className="font-np-body" key={t.id} value={t.id.toString()}>{normalizeTeamName(t.name)}</SelectItem>)}
                               </SelectContent>
                             </Select>
                           </TableCell>

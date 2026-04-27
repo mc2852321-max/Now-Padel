@@ -11,7 +11,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { fetchAllPlayers, type PlayersPageResponse } from "@/lib/players";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, Calendar as CalendarIcon, History } from "lucide-react";
+import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, Calendar as CalendarIcon, History, Save } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
+type TimerSound = 'start-warmup' | 'start-game' | 'end-game' | 'final';
 type SyncedTimer = Omit<NonstopTimer, "isActive" | "phaseEndsAt" | "updatedAt"> & {
   isActive: boolean;
   phaseEndsAt: string | null;
@@ -76,6 +77,18 @@ function toLisbonDayKey(dateLike: Date | string | null | undefined) {
   return value.toLocaleDateString("sv-SE", { timeZone: "Europe/Lisbon" });
 }
 
+function toLisbonTimeKey(dateLike: Date | string | null | undefined) {
+  if (!dateLike) return "";
+  const value = new Date(dateLike);
+  if (Number.isNaN(value.getTime())) return "";
+  return value.toLocaleTimeString("pt-PT", {
+    timeZone: "Europe/Lisbon",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 export default function Nonstop() {
   const { toast } = useToast();
   const [viewMode, setViewMode] = useState<"current" | "history">("current");
@@ -98,6 +111,9 @@ export default function Nonstop() {
 
   const selectedHistoryEvent = events.find((event) => event.id === selectedHistoryEventId) ?? null;
   const readOnlyMode = viewMode === "history";
+  const editableEvent = viewMode === "history" ? selectedHistoryEvent : (currentEvent ?? null);
+  const [eventDateInput, setEventDateInput] = useState(toLisbonDayKey(new Date()));
+  const [eventTimeInput, setEventTimeInput] = useState("21:30");
 
   const { data: settings } = useQuery<Settings>({
     queryKey: ["/api/settings"],
@@ -142,16 +158,18 @@ export default function Nonstop() {
       .filter((id): id is number => typeof id === "number" && id > 0)
       .map((id) => playersById.get(id))
       .filter((player): player is Player => Boolean(player))
-      .map((player) => `${player.name} (${player.level})`);
+      .map((player) => player.name);
 
     if (linkedPlayers.length === 0) return null;
     return linkedPlayers.join(" / ");
   };
 
   const getTeamOptionLabel = (team: Team) => {
+    const normalizedName = normalizeTeamName(team.name ?? "");
+    if (normalizedName) return normalizedName;
     const linkedPlayers = getLinkedPlayersDisplay(team);
-    if (!linkedPlayers) return normalizeTeamName(team.name);
-    return `${normalizeTeamName(team.name)} - ${linkedPlayers}`;
+    if (linkedPlayers) return linkedPlayers;
+    return "Dupla sem nome";
   };
 
   const teamsQueryKey = readOnlyMode && selectedHistoryEventId
@@ -200,7 +218,16 @@ export default function Nonstop() {
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
   const soundBusyUntilRef = useRef(0);
   const soundTimeoutsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
-  const lastQueuedSoundRef = useRef<{ key: string; at: number } | null>(null);
+  const lastQueuedSoundRef = useRef<{ key: string; type: TimerSound; at: number } | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const airHornAudioRef = useRef<HTMLAudioElement | null>(null);
+  const lastBoundarySoundKeyRef = useRef<string | null>(null);
+  const lastSyncedTimerSnapshotRef = useRef<{
+    timerState: TimerState;
+    isActive: boolean;
+    round: number;
+    phaseEndsAt: string | null;
+  } | null>(null);
 
   const numCourts = settings?.nonstopCourts || 3;
   const numTeams = numCourts * 2;
@@ -231,6 +258,51 @@ export default function Nonstop() {
       setSelectedHistoryEventId(eventsForSelectedDate[0].id);
     }
   }, [viewMode, selectedHistoryEventId, events, eventsForSelectedDate]);
+
+  useEffect(() => {
+    if (!editableEvent) {
+      setEventDateInput(toLisbonDayKey(new Date()));
+      setEventTimeInput("21:30");
+      return;
+    }
+
+    const eventDate = editableEvent.startedAt ?? editableEvent.createdAt;
+    setEventDateInput(toLisbonDayKey(eventDate));
+    setEventTimeInput(toLisbonTimeKey(eventDate) || "21:30");
+  }, [editableEvent?.id, editableEvent?.startedAt, editableEvent?.createdAt]);
+
+  const updateEventMetadataMutation = useMutation({
+    mutationFn: async (payload: { id: number; eventDate: string; eventTime: string }) => {
+      const res = await apiRequest("PATCH", `/api/nonstop/events/${payload.id}`, {
+        eventDate: payload.eventDate,
+        eventTime: payload.eventTime,
+      });
+      return res.json() as Promise<NonstopEventSummary>;
+    },
+    onSuccess: (event) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/nonstop/current"] });
+      queryClient.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/nonstop/events"),
+      });
+
+      if (viewMode === "history") {
+        const eventDate = event.startedAt ?? event.createdAt;
+        const nextHistoryDate = new Date(eventDate);
+        if (!Number.isNaN(nextHistoryDate.getTime())) {
+          setHistoryDate(nextHistoryDate);
+        }
+      }
+
+      toast({ title: "Guardado", description: "Data e hora do Non Stop atualizadas." });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro",
+        description: error?.message || "Nao foi possivel atualizar a data e hora do Non Stop.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const syncTimerMutation = useMutation({
     mutationFn: async (payload: {
@@ -423,7 +495,7 @@ export default function Nonstop() {
   }, [timerQueryKey]);
 
   const resolveSoundType = (
-    type: 'start-warmup' | 'start-game' | 'end-game' | 'final'
+    type: TimerSound
   ) => {
     let soundType = settings?.startGameSound || 'beep-high';
     if (type === 'start-warmup') soundType = settings?.startWarmupSound || 'beep-low';
@@ -444,37 +516,98 @@ export default function Nonstop() {
     return 1400;
   };
 
-  const playSound = (type: 'start-warmup' | 'start-game' | 'end-game' | 'final') => {
+  const ensureAudioContext = async () => {
+    if (typeof window === "undefined") return null;
+    const win = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
+    const AudioContextCtor = win.AudioContext || win.webkitAudioContext;
+    if (!AudioContextCtor) return null;
+
+    if (!audioContextRef.current || audioContextRef.current.state === "closed") {
+      audioContextRef.current = new AudioContextCtor();
+    }
+
+    if (audioContextRef.current.state === "suspended") {
+      try {
+        await audioContextRef.current.resume();
+      } catch {
+        return null;
+      }
+    }
+
+    return audioContextRef.current;
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!airHornAudioRef.current) {
+      const audio = new Audio("/sounds/air-horn.mpeg");
+      audio.preload = "auto";
+      audio.load();
+      airHornAudioRef.current = audio;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let removed = false;
+
+    const unlockAudio = () => {
+      if (removed) return;
+      void ensureAudioContext();
+      if (airHornAudioRef.current) {
+        airHornAudioRef.current.load();
+      }
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+      removed = true;
+    };
+
+    window.addEventListener("pointerdown", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
+    window.addEventListener("touchstart", unlockAudio, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+      removed = true;
+    };
+  }, []);
+
+  const playSound = (type: TimerSound, dedupeKeyOverride?: string) => {
     const soundType = resolveSoundType(type);
     const now = Date.now();
-    const dedupeKey = `${type}:${timerState}:${round}`;
+    const dedupeKey = dedupeKeyOverride || `${type}:${timerState}:${round}`;
     const lastQueuedSound = lastQueuedSoundRef.current;
     if (
       lastQueuedSound &&
-      lastQueuedSound.key === dedupeKey &&
-      now - lastQueuedSound.at < 1200
+      (
+        (lastQueuedSound.key === dedupeKey && now - lastQueuedSound.at < 10000) ||
+        (lastQueuedSound.type === type && now - lastQueuedSound.at < 4000)
+      )
     ) {
       return;
     }
-    lastQueuedSoundRef.current = { key: dedupeKey, at: now };
+    lastQueuedSoundRef.current = { key: dedupeKey, type, at: now };
 
     const durationMs = getSoundDurationMs(soundType);
     const scheduledStart = Math.max(now, soundBusyUntilRef.current);
     const queueGapMs = 120;
     soundBusyUntilRef.current = scheduledStart + durationMs + queueGapMs;
 
-    const runPlayback = () => {
+    const runPlayback = async () => {
       const liveSoundType = resolveSoundType(type);
+      const ctx = await ensureAudioContext();
 
       const frequency = liveSoundType === 'beep-high' ? 880 : 
                         liveSoundType === 'beep-low' ? 440 :
                         liveSoundType === 'horn-deep' ? 60 :
                         liveSoundType === 'air-horn' ? 85 :
                         liveSoundType.includes('horn') ? 100 : 440; // Frequency for horn variants
-      
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      
+
       const playBeep = (delay: number, duration: number = 0.4, isHorn: boolean = false) => {
+        if (!ctx) return;
         const osc1 = ctx.createOscillator();
         const osc2 = ctx.createOscillator(); 
         const gain = ctx.createGain();
@@ -508,7 +641,7 @@ export default function Nonstop() {
       };
 
       const playAirHornSample = (durationSeconds: number) => {
-        const audio = new Audio("/sounds/air-horn.mpeg");
+        const audio = airHornAudioRef.current ?? new Audio("/sounds/air-horn.mpeg");
         audio.preload = "auto";
         audio.currentTime = 0;
         let stopTimer: ReturnType<typeof setTimeout> | null = null;
@@ -522,7 +655,7 @@ export default function Nonstop() {
 
         audio.addEventListener("ended", () => {
           if (stopTimer) clearTimeout(stopTimer);
-        });
+        }, { once: true });
 
         audio.play().catch(() => {
           if (stopTimer) clearTimeout(stopTimer);
@@ -553,12 +686,12 @@ export default function Nonstop() {
 
     const delay = scheduledStart - now;
     if (delay <= 0) {
-      runPlayback();
+      void runPlayback();
       return;
     }
 
     const timeoutId = setTimeout(() => {
-      runPlayback();
+      void runPlayback();
       soundTimeoutsRef.current = soundTimeoutsRef.current.filter((id) => id !== timeoutId);
     }, delay);
     soundTimeoutsRef.current.push(timeoutId);
@@ -574,7 +707,7 @@ export default function Nonstop() {
   const beginPhase = (
     nextState: TimerState,
     durationSeconds: number,
-    sound?: 'start-warmup' | 'start-game' | 'end-game' | 'final',
+    sound?: TimerSound,
     isActiveOverride: boolean = isActive,
     roundOverride: number = round,
   ) => {
@@ -592,8 +725,121 @@ export default function Nonstop() {
       timeLeft: safeDuration,
       phaseEndsAt: nextPhaseEndAt,
     });
-    if (sound) playSound(sound);
+    if (sound) {
+      const phaseKey = nextPhaseEndAt ? Math.floor(nextPhaseEndAt / 1000) : 0;
+      playSound(sound, `sync:${sound}:${nextState}:${roundOverride}:${phaseKey}`);
+    }
   };
+
+  useEffect(() => {
+    if (!syncedTimer || readOnlyMode) return;
+
+    const nextSnapshot = {
+      timerState: syncedTimer.timerState as TimerState,
+      isActive: Boolean(syncedTimer.isActive),
+      round: Math.max(1, syncedTimer.round || 1),
+      phaseEndsAt: syncedTimer.phaseEndsAt ?? null,
+    };
+
+    const prevSnapshot = lastSyncedTimerSnapshotRef.current;
+    lastSyncedTimerSnapshotRef.current = nextSnapshot;
+
+    if (!prevSnapshot) return;
+    if (
+      prevSnapshot.timerState === nextSnapshot.timerState &&
+      prevSnapshot.isActive === nextSnapshot.isActive &&
+      prevSnapshot.round === nextSnapshot.round &&
+      prevSnapshot.phaseEndsAt === nextSnapshot.phaseEndsAt
+    ) {
+      return;
+    }
+
+    let transitionSound: TimerSound | null = null;
+
+    if (
+      prevSnapshot.timerState === "warmup" &&
+      nextSnapshot.timerState === "game" &&
+      nextSnapshot.isActive
+    ) {
+      transitionSound = "start-game";
+    } else if (
+      prevSnapshot.timerState === "game" &&
+      nextSnapshot.timerState === "rest" &&
+      nextSnapshot.isActive
+    ) {
+      transitionSound = "end-game";
+    } else if (
+      prevSnapshot.timerState === "rest" &&
+      nextSnapshot.timerState === "game" &&
+      nextSnapshot.isActive
+    ) {
+      transitionSound = "start-game";
+    } else if (
+      prevSnapshot.timerState === "game" &&
+      nextSnapshot.timerState === "game" &&
+      nextSnapshot.isActive &&
+      nextSnapshot.round > prevSnapshot.round
+    ) {
+      transitionSound = "start-game";
+    } else if (
+      prevSnapshot.timerState === "game" &&
+      prevSnapshot.isActive &&
+      prevSnapshot.round >= totalRounds &&
+      nextSnapshot.timerState === "idle" &&
+      !nextSnapshot.isActive
+    ) {
+      transitionSound = "final";
+    }
+
+    if (!transitionSound) return;
+
+    const phaseKey = nextSnapshot.phaseEndsAt
+      ? Math.floor(new Date(nextSnapshot.phaseEndsAt).getTime() / 1000)
+      : 0;
+
+    playSound(
+      transitionSound,
+      `sync:${transitionSound}:${nextSnapshot.timerState}:${nextSnapshot.round}:${phaseKey}`,
+    );
+  }, [
+    syncedTimer?.updatedAt,
+    syncedTimer?.timerState,
+    syncedTimer?.isActive,
+    syncedTimer?.round,
+    syncedTimer?.phaseEndsAt,
+    readOnlyMode,
+    totalRounds,
+  ]);
+
+  useEffect(() => {
+    if (!isActive || timeLeft > 0 || readOnlyMode) return;
+
+    let fallbackSound: TimerSound | null = null;
+    if (timerState === "warmup") {
+      fallbackSound = "start-game";
+    } else if (timerState === "game" && round < totalRounds) {
+      fallbackSound = "end-game";
+    } else if (timerState === "game" && round >= totalRounds) {
+      fallbackSound = "final";
+    } else if (timerState === "rest" && round < totalRounds) {
+      fallbackSound = "start-game";
+    }
+
+    if (!fallbackSound) return;
+
+    const phaseKey = phaseEndAtRef.current ? Math.floor(phaseEndAtRef.current / 1000) : 0;
+    const boundaryKey = `boundary:${fallbackSound}:${timerState}:${round}:${phaseKey}`;
+    if (lastBoundarySoundKeyRef.current === boundaryKey) return;
+    lastBoundarySoundKeyRef.current = boundaryKey;
+
+    playSound(fallbackSound, boundaryKey);
+  }, [isActive, timeLeft, timerState, round, totalRounds, readOnlyMode]);
+
+  useEffect(() => {
+    if (readOnlyMode) {
+      lastSyncedTimerSnapshotRef.current = null;
+    }
+  }, [readOnlyMode]);
 
   useEffect(() => {
     if (!isActive) {
@@ -619,6 +865,17 @@ export default function Nonstop() {
   useEffect(() => {
     return () => {
       clearScheduledSounds();
+      const ctx = audioContextRef.current;
+      audioContextRef.current = null;
+      if (ctx && ctx.state !== "closed") {
+        void ctx.close().catch(() => {});
+      }
+      const airHornAudio = airHornAudioRef.current;
+      airHornAudioRef.current = null;
+      if (airHornAudio) {
+        airHornAudio.pause();
+        airHornAudio.currentTime = 0;
+      }
     };
   }, []);
 
@@ -1328,7 +1585,7 @@ export default function Nonstop() {
 
   const stats = getStandings();
   const selectedEventTimeLabel = selectedHistoryEvent
-    ? format(new Date(selectedHistoryEvent.startedAt ?? selectedHistoryEvent.createdAt), "HH:mm")
+    ? toLisbonTimeKey(selectedHistoryEvent.startedAt ?? selectedHistoryEvent.createdAt)
     : null;
   const daysWithEvents = events.map((event) => new Date(event.startedAt ?? event.createdAt));
 
@@ -1457,6 +1714,45 @@ export default function Nonstop() {
               <Badge variant="outline" className="h-9 px-2 text-[11px] border-slate-300 text-slate-600">
                 {eventsForSelectedDate.length === 0 ? "Sem eventos neste dia" : "Seleciona um horario"}
               </Badge>
+            ) : null}
+
+            {editableEvent ? (
+              <div className="flex flex-wrap items-center gap-1 rounded-md border bg-slate-50 p-1">
+                <Input
+                  type="date"
+                  value={eventDateInput}
+                  onChange={(event) => setEventDateInput(event.target.value)}
+                  className="h-8 w-[132px] text-[11px]"
+                  title="Dia do Non Stop"
+                />
+                <Input
+                  type="time"
+                  value={eventTimeInput}
+                  onChange={(event) => setEventTimeInput(event.target.value)}
+                  className="h-8 w-[92px] text-[11px]"
+                  title="Hora do Non Stop"
+                />
+                <Button
+                  size="sm"
+                  className="h-8 gap-1 px-2 text-[11px] bg-orange-600 text-white hover:bg-orange-500"
+                  disabled={
+                    updateEventMetadataMutation.isPending ||
+                    !eventDateInput ||
+                    !eventTimeInput
+                  }
+                  onClick={() => {
+                    updateEventMetadataMutation.mutate({
+                      id: editableEvent.id,
+                      eventDate: eventDateInput,
+                      eventTime: eventTimeInput,
+                    });
+                  }}
+                  title="Guardar data e hora"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Guardar
+                </Button>
+              </div>
             ) : null}
           </div>
           <Card className={cn(
@@ -1752,18 +2048,7 @@ export default function Nonstop() {
                     {(teams || []).map((team) => (
                       <TableRow key={team.id}>
                         <TableCell className="font-medium">
-                          <div className="space-y-0.5">
-                            <p>{team.name}</p>
-                            {(() => {
-                              const linkedPlayers = getLinkedPlayersDisplay(team);
-                              if (!linkedPlayers) return null;
-                              return (
-                                <p className="text-xs text-muted-foreground">
-                                  {linkedPlayers}
-                                </p>
-                              );
-                            })()}
-                          </div>
+                          <p>{getTeamOptionLabel(team)}</p>
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -2008,7 +2293,7 @@ export default function Nonstop() {
                   }}
                 >
                   <span>{event.label || "Non Stop"}</span>
-                  <span>{format(new Date(event.startedAt ?? event.createdAt), "HH:mm")}</span>
+                  <span>{toLisbonTimeKey(event.startedAt ?? event.createdAt)}</span>
                 </Button>
               ))
             )}
@@ -2067,6 +2352,10 @@ function TeamForm({
   });
   const selectedPlayerAId = form.watch("playerAId");
   const selectedPlayerBId = form.watch("playerBId");
+  const [playerASearch, setPlayerASearch] = useState("");
+  const [playerBSearch, setPlayerBSearch] = useState("");
+  const [isPlayerASelectOpen, setIsPlayerASelectOpen] = useState(false);
+  const [isPlayerBSelectOpen, setIsPlayerBSelectOpen] = useState(false);
   const occupiedPlayerIds = useMemo(() => {
     const ids = new Set<number>();
     for (const team of teams) {
@@ -2076,6 +2365,29 @@ function TeamForm({
     }
     return ids;
   }, [teams, editingTeamId]);
+  const sortedPlayers = useMemo(
+    () =>
+      [...players].sort((a, b) =>
+        a.name.localeCompare(b.name, "pt-PT", { sensitivity: "base" }),
+      ),
+    [players],
+  );
+  const filteredPlayersA = useMemo(() => {
+    const searchValue = playerASearch.trim().toLocaleLowerCase();
+    if (!searchValue) return sortedPlayers;
+    return sortedPlayers.filter((player) =>
+      player.id === selectedPlayerAId ||
+      player.name.toLocaleLowerCase().includes(searchValue),
+    );
+  }, [playerASearch, sortedPlayers, selectedPlayerAId]);
+  const filteredPlayersB = useMemo(() => {
+    const searchValue = playerBSearch.trim().toLocaleLowerCase();
+    if (!searchValue) return sortedPlayers;
+    return sortedPlayers.filter((player) =>
+      player.id === selectedPlayerBId ||
+      player.name.toLocaleLowerCase().includes(searchValue),
+    );
+  }, [playerBSearch, sortedPlayers, selectedPlayerBId]);
 
   const applyAutoName = () => {
     const nameA = typeof selectedPlayerAId === "number" ? playersById.get(selectedPlayerAId)?.name : null;
@@ -2095,6 +2407,11 @@ function TeamForm({
               <FormItem>
                 <FormLabel>Jogador A</FormLabel>
                 <Select
+                  open={isPlayerASelectOpen}
+                  onOpenChange={(open) => {
+                    setIsPlayerASelectOpen(open);
+                    if (!open) setPlayerASearch("");
+                  }}
                   value={typeof field.value === "number" ? String(field.value) : undefined}
                   onValueChange={(value) => field.onChange(Number(value))}
                 >
@@ -2104,18 +2421,31 @@ function TeamForm({
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    {players.map((player) => (
-                      <SelectItem
-                        key={`team-player-a-${player.id}`}
-                        value={String(player.id)}
-                        disabled={
-                          selectedPlayerBId === player.id ||
-                          (occupiedPlayerIds.has(player.id) && selectedPlayerAId !== player.id)
-                        }
-                      >
-                        {player.name} ({player.level})
-                      </SelectItem>
-                    ))}
+                    <div className="px-2 pb-1 pt-1">
+                      <Input
+                        value={playerASearch}
+                        onChange={(event) => setPlayerASearch(event.target.value)}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        placeholder="Procurar jogador..."
+                        className="h-8"
+                      />
+                    </div>
+                    {filteredPlayersA.length === 0 ? (
+                      <p className="px-2 py-1 text-xs text-muted-foreground">Sem jogadores encontrados.</p>
+                    ) : (
+                      filteredPlayersA.map((player) => (
+                        <SelectItem
+                          key={`team-player-a-${player.id}`}
+                          value={String(player.id)}
+                          disabled={
+                            selectedPlayerBId === player.id ||
+                            (occupiedPlayerIds.has(player.id) && selectedPlayerAId !== player.id)
+                          }
+                        >
+                          {player.name}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
                 <FormMessage />
@@ -2130,6 +2460,11 @@ function TeamForm({
               <FormItem>
                 <FormLabel>Jogador B</FormLabel>
                 <Select
+                  open={isPlayerBSelectOpen}
+                  onOpenChange={(open) => {
+                    setIsPlayerBSelectOpen(open);
+                    if (!open) setPlayerBSearch("");
+                  }}
                   value={typeof field.value === "number" ? String(field.value) : undefined}
                   onValueChange={(value) => field.onChange(Number(value))}
                 >
@@ -2139,18 +2474,31 @@ function TeamForm({
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    {players.map((player) => (
-                      <SelectItem
-                        key={`team-player-b-${player.id}`}
-                        value={String(player.id)}
-                        disabled={
-                          selectedPlayerAId === player.id ||
-                          (occupiedPlayerIds.has(player.id) && selectedPlayerBId !== player.id)
-                        }
-                      >
-                        {player.name} ({player.level})
-                      </SelectItem>
-                    ))}
+                    <div className="px-2 pb-1 pt-1">
+                      <Input
+                        value={playerBSearch}
+                        onChange={(event) => setPlayerBSearch(event.target.value)}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        placeholder="Procurar jogador..."
+                        className="h-8"
+                      />
+                    </div>
+                    {filteredPlayersB.length === 0 ? (
+                      <p className="px-2 py-1 text-xs text-muted-foreground">Sem jogadores encontrados.</p>
+                    ) : (
+                      filteredPlayersB.map((player) => (
+                        <SelectItem
+                          key={`team-player-b-${player.id}`}
+                          value={String(player.id)}
+                          disabled={
+                            selectedPlayerAId === player.id ||
+                            (occupiedPlayerIds.has(player.id) && selectedPlayerBId !== player.id)
+                          }
+                        >
+                          {player.name}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
                 <FormMessage />

@@ -30,6 +30,52 @@ import { eq, and, or, ilike, desc, count, sql, inArray } from "drizzle-orm";
 type DbExecutor = typeof db;
 type NonstopEventStatus = "draft" | "active" | "completed" | "cancelled";
 const LISBON_TIMEZONE = "Europe/Lisbon";
+const DEFAULT_NONSTOP_TIME = "21:30";
+
+function getTimeZoneOffsetMinutes(date: Date, timeZone: string): number {
+  const offsetPart = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    timeZoneName: "shortOffset",
+    hour: "2-digit",
+  })
+    .formatToParts(date)
+    .find((part) => part.type === "timeZoneName")?.value ?? "GMT";
+  const match = /^GMT(?:(\+|-)(\d{1,2})(?::?(\d{2}))?)?$/.exec(offsetPart);
+  if (!match) return 0;
+  const sign = match[1] === "-" ? -1 : 1;
+  const hours = Number(match[2] ?? 0);
+  const minutes = Number(match[3] ?? 0);
+  return sign * (hours * 60 + minutes);
+}
+
+export function getLisbonDateInput(dateLike: Date | string | null | undefined = new Date()): string {
+  const value = dateLike ? new Date(dateLike) : new Date();
+  const safeValue = Number.isNaN(value.getTime()) ? new Date() : value;
+  return safeValue.toLocaleDateString("sv-SE", { timeZone: LISBON_TIMEZONE });
+}
+
+export function getLisbonTimeInput(dateLike: Date | string | null | undefined = new Date()): string {
+  const value = dateLike ? new Date(dateLike) : new Date();
+  const safeValue = Number.isNaN(value.getTime()) ? new Date() : value;
+  return safeValue.toLocaleTimeString("pt-PT", {
+    timeZone: LISBON_TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+export function createLisbonDateTime(dateValue: string, timeValue = DEFAULT_NONSTOP_TIME): Date {
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const [hour, minute] = timeValue.split(":").map(Number);
+  const utcGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0));
+  const offsetMinutes = getTimeZoneOffsetMinutes(utcGuess, LISBON_TIMEZONE);
+  return new Date(utcGuess.getTime() - offsetMinutes * 60_000);
+}
+
+function getDefaultNonstopStartedAt(): Date {
+  return createLisbonDateTime(getLisbonDateInput(new Date()), DEFAULT_NONSTOP_TIME);
+}
 
 export type PlayersPage = {
   items: Player[];
@@ -81,6 +127,7 @@ export interface IStorage {
   getCurrentNonstopEvent(): Promise<NonstopEvent>;
   listNonstopEvents(filters?: { from?: Date; to?: Date }): Promise<NonstopEventSummary[]>;
   getNonstopEventById(id: number): Promise<NonstopEvent | null>;
+  updateNonstopEventMetadata(id: number, update: { label?: string | null; startedAt?: Date | null }): Promise<NonstopEvent | null>;
   getNonstopEventDetails(id: number): Promise<NonstopEventDetails | null>;
   finalizeAndStartNonstop(opts?: { label?: string; userEmail?: string | null }): Promise<{ completedEventId: number; newEvent: NonstopEvent }>;
   purgeOldNonstopEvents(retentionDays?: number): Promise<number>;
@@ -401,11 +448,19 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(nonstopEvents.id))
       .limit(1);
 
-    if (active[0]) return active[0];
+    if (active[0]) {
+      if (active[0].startedAt) return active[0];
+      const [updated] = await executor
+        .update(nonstopEvents)
+        .set({ startedAt: getDefaultNonstopStartedAt() })
+        .where(eq(nonstopEvents.id, active[0].id))
+        .returning();
+      return updated ?? active[0];
+    }
 
     const [created] = await executor
       .insert(nonstopEvents)
-      .values({ status: "active" })
+      .values({ status: "active", startedAt: getDefaultNonstopStartedAt() })
       .returning();
 
     await executor.insert(nonstopTimer).values({ eventId: created.id }).onConflictDoNothing();
@@ -486,12 +541,13 @@ export class DatabaseStorage implements IStorage {
 
   async listNonstopEvents(filters?: { from?: Date; to?: Date }): Promise<NonstopEventSummary[]> {
     const conditions: any[] = [];
-    if (filters?.from) conditions.push(sql`${nonstopEvents.createdAt} >= ${filters.from}`);
-    if (filters?.to) conditions.push(sql`${nonstopEvents.createdAt} < ${filters.to}`);
+    const eventDate = sql`COALESCE(${nonstopEvents.startedAt}, ${nonstopEvents.createdAt})`;
+    if (filters?.from) conditions.push(sql`${eventDate} >= ${filters.from}`);
+    if (filters?.to) conditions.push(sql`${eventDate} < ${filters.to}`);
     const where = conditions.length > 1 ? and(...conditions) : conditions[0];
     const rows = where
-      ? await db.select().from(nonstopEvents).where(where).orderBy(desc(nonstopEvents.createdAt))
-      : await db.select().from(nonstopEvents).orderBy(desc(nonstopEvents.createdAt));
+      ? await db.select().from(nonstopEvents).where(where).orderBy(desc(eventDate))
+      : await db.select().from(nonstopEvents).orderBy(desc(eventDate));
     return rows.map((row) => ({
       id: row.id,
       status: row.status,
@@ -504,6 +560,26 @@ export class DatabaseStorage implements IStorage {
 
   async getNonstopEventById(id: number): Promise<NonstopEvent | null> {
     const [event] = await db.select().from(nonstopEvents).where(eq(nonstopEvents.id, id));
+    return event ?? null;
+  }
+
+  async updateNonstopEventMetadata(
+    id: number,
+    update: { label?: string | null; startedAt?: Date | null },
+  ): Promise<NonstopEvent | null> {
+    const values: Partial<Pick<NonstopEvent, "label" | "startedAt">> = {};
+    if ("label" in update) values.label = update.label?.trim() || null;
+    if ("startedAt" in update) values.startedAt = update.startedAt ?? null;
+
+    if (Object.keys(values).length === 0) {
+      return this.getNonstopEventById(id);
+    }
+
+    const [event] = await db
+      .update(nonstopEvents)
+      .set(values)
+      .where(eq(nonstopEvents.id, id))
+      .returning();
     return event ?? null;
   }
 
@@ -614,6 +690,7 @@ export class DatabaseStorage implements IStorage {
         .insert(nonstopEvents)
         .values({
           status: "active",
+          startedAt: getDefaultNonstopStartedAt(),
           createdBy: opts?.userEmail ?? null,
         })
         .returning();

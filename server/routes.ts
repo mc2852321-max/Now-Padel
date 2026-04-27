@@ -1,6 +1,6 @@
 import express, { type Express, type Request, type RequestHandler, type Response } from "express";
 import type { Server } from "http";
-import { storage } from "./storage.js";
+import { createLisbonDateTime, getLisbonDateInput, getLisbonTimeInput, storage } from "./storage.js";
 import { api } from "../shared/routes.js";
 import { insertTeamSchema, insertNonstopResultSchema, createAuthorizedUserRequestSchema, loginSchema, changePasswordSchema, rankingImportSchema } from "../shared/schema.js";
 import { z } from "zod";
@@ -46,6 +46,19 @@ const timerSyncSchema = z.object({
 
 const finalizeAndStartSchema = z.object({
   label: z.string().max(120).optional(),
+});
+
+const nonstopEventMetadataSchema = z.object({
+  label: z.string().max(120).nullable().optional(),
+  eventDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+    const [year, month, day] = value.split("-").map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+  }, "Data invalida").optional(),
+  eventTime: z.string().regex(/^\d{2}:\d{2}$/).refine((value) => {
+    const [hour, minute] = value.split(":").map(Number);
+    return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
+  }, "Hora invalida").optional(),
 });
 const LISBON_TIMEZONE = "Europe/Lisbon";
 
@@ -536,6 +549,49 @@ export async function registerRoutes(
       return res.status(404).json({ message: "Event not found" });
     }
     res.json(details);
+  });
+
+  app.patch("/api/nonstop/events/:id", isAuthenticated, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ message: "Invalid event id" });
+      }
+
+      const input = nonstopEventMetadataSchema.parse(req.body ?? {});
+      const current = await storage.getNonstopEventById(id);
+      if (!current) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+
+      let startedAt: Date | undefined;
+      if (input.eventDate !== undefined || input.eventTime !== undefined) {
+        const currentDate = getLisbonDateInput(current.startedAt ?? current.createdAt);
+        const currentTime = getLisbonTimeInput(current.startedAt ?? current.createdAt);
+        startedAt = createLisbonDateTime(
+          input.eventDate ?? currentDate,
+          input.eventTime ?? currentTime,
+        );
+      }
+
+      const event = await storage.updateNonstopEventMetadata(id, {
+        label: input.label,
+        startedAt,
+      });
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+
+      res.json(event);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join("."),
+        });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
   });
 
   app.post("/api/nonstop/finalize-and-start", isAuthenticated, async (req, res) => {

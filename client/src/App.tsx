@@ -3,11 +3,6 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/not-found";
-import Players from "@/pages/players";
-import Nonstop from "@/pages/nonstop";
-import Messages from "@/pages/messages";
-import Settings from "@/pages/settings";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { useQuery } from "@tanstack/react-query";
@@ -26,17 +21,27 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
+
+const NotFoundPage = lazy(() => import("@/pages/not-found"));
+const PlayersPage = lazy(() => import("@/pages/players"));
+const NonstopPage = lazy(() => import("@/pages/nonstop"));
+const RankingPage = lazy(() => import("@/pages/ranking"));
+const MessagesPage = lazy(() => import("@/pages/messages"));
+const SettingsPage = lazy(() => import("@/pages/settings"));
 
 function Router() {
   return (
-    <Switch>
-      <Route path="/" component={Players} />
-      <Route path="/nonstop" component={Nonstop} />
-      <Route path="/messages" component={Messages} />
-      <Route path="/settings" component={Settings} />
-      <Route component={NotFound} />
-    </Switch>
+    <Suspense fallback={<LoadingScreen />}>
+      <Switch>
+        <Route path="/" component={PlayersPage} />
+        <Route path="/nonstop" component={NonstopPage} />
+        <Route path="/ranking" component={RankingPage} />
+        <Route path="/messages" component={MessagesPage} />
+        <Route path="/settings" component={SettingsPage} />
+        <Route component={NotFoundPage} />
+      </Switch>
+    </Suspense>
   );
 }
 

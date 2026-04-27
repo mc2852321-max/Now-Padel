@@ -1,8 +1,8 @@
-import express, { type Express, type RequestHandler } from "express";
+import express, { type Express, type Request, type RequestHandler, type Response } from "express";
 import type { Server } from "http";
 import { storage } from "./storage.js";
 import { api } from "../shared/routes.js";
-import { insertTeamSchema, createAuthorizedUserRequestSchema, loginSchema, changePasswordSchema } from "../shared/schema.js";
+import { insertTeamSchema, insertNonstopResultSchema, createAuthorizedUserRequestSchema, loginSchema, changePasswordSchema, rankingImportSchema } from "../shared/schema.js";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
@@ -22,6 +22,10 @@ const shouldUseSsl =
   Boolean(process.env.VERCEL) ||
   Boolean(databaseUrl && /neon\.tech/i.test(databaseUrl)) ||
   Boolean(databaseUrl && /sslmode=require/i.test(databaseUrl));
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 10;
+const loginRateLimitState = new Map<string, { count: number; windowStartedAt: number }>();
 
 // Custom authentication middleware
 const isAuthenticated: RequestHandler = (req, res, next) => {
@@ -43,6 +47,13 @@ const timerSyncSchema = z.object({
 const finalizeAndStartSchema = z.object({
   label: z.string().max(120).optional(),
 });
+const LISBON_TIMEZONE = "Europe/Lisbon";
+
+type BootstrapAuthUser = {
+  email: string;
+  name: string;
+  password: string;
+};
 
 function parseEventId(value: unknown): number | undefined {
   if (value === undefined || value === null || value === "") return undefined;
@@ -51,8 +62,129 @@ function parseEventId(value: unknown): number | undefined {
   return parsed;
 }
 
+function parseSeasonYear(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 2000 || parsed > 3000) return undefined;
+  return parsed;
+}
+
+function getLisbonYear(dateLike?: Date | string | null): number {
+  const value = dateLike ? new Date(dateLike) : new Date();
+  if (Number.isNaN(value.getTime())) {
+    const fallback = Number(new Intl.DateTimeFormat("en-CA", { timeZone: LISBON_TIMEZONE, year: "numeric" }).format(new Date()));
+    return Number.isInteger(fallback) ? fallback : new Date().getUTCFullYear();
+  }
+  const year = Number(new Intl.DateTimeFormat("en-CA", { timeZone: LISBON_TIMEZONE, year: "numeric" }).format(value));
+  if (!Number.isInteger(year)) return new Date().getUTCFullYear();
+  return year;
+}
+
 function toPhaseEndAt(seconds: number): Date {
   return new Date(Date.now() + Math.max(0, seconds) * 1000);
+}
+
+function normalizeEmail(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function getLoginRateLimitKey(req: Request): string {
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  const email = normalizeEmail((req.body as { email?: unknown } | undefined)?.email);
+  return `${ip}:${email || "-"}`;
+}
+
+function pruneLoginRateLimit(now: number): void {
+  loginRateLimitState.forEach((state, key) => {
+    if (now - state.windowStartedAt >= LOGIN_RATE_LIMIT_WINDOW_MS) {
+      loginRateLimitState.delete(key);
+    }
+  });
+}
+
+function enforceLoginRateLimit(req: Request, res: Response): boolean {
+  const now = Date.now();
+  pruneLoginRateLimit(now);
+
+  const key = getLoginRateLimitKey(req);
+  const current = loginRateLimitState.get(key);
+  if (!current) return false;
+
+  const elapsed = now - current.windowStartedAt;
+  if (elapsed >= LOGIN_RATE_LIMIT_WINDOW_MS) {
+    loginRateLimitState.delete(key);
+    return false;
+  }
+
+  if (current.count < LOGIN_RATE_LIMIT_MAX_ATTEMPTS) {
+    return false;
+  }
+
+  const retryAfterSeconds = Math.ceil((LOGIN_RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
+  res.setHeader("Retry-After", String(retryAfterSeconds));
+  res.status(429).json({
+    message: "Demasiadas tentativas de login. Tenta novamente dentro de alguns minutos.",
+  });
+  return true;
+}
+
+function registerFailedLogin(req: Request): void {
+  const now = Date.now();
+  const key = getLoginRateLimitKey(req);
+  const current = loginRateLimitState.get(key);
+
+  if (!current || now - current.windowStartedAt >= LOGIN_RATE_LIMIT_WINDOW_MS) {
+    loginRateLimitState.set(key, { count: 1, windowStartedAt: now });
+    return;
+  }
+
+  loginRateLimitState.set(key, {
+    count: current.count + 1,
+    windowStartedAt: current.windowStartedAt,
+  });
+}
+
+function clearLoginRateLimit(req: Request): void {
+  loginRateLimitState.delete(getLoginRateLimitKey(req));
+}
+
+function loadBootstrapUsersFromEnv(): BootstrapAuthUser[] {
+  const raw = process.env.BOOTSTRAP_AUTH_USERS_JSON?.trim();
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      console.error("[startup] BOOTSTRAP_AUTH_USERS_JSON must be a JSON array.");
+      return [];
+    }
+
+    const uniqueByEmail = new Map<string, BootstrapAuthUser>();
+    for (const item of parsed) {
+      if (typeof item !== "object" || item === null) continue;
+
+      const email = normalizeEmail((item as { email?: unknown }).email);
+      const name = typeof (item as { name?: unknown }).name === "string"
+        ? (item as { name?: string }).name!.trim()
+        : "";
+      const password = typeof (item as { password?: unknown }).password === "string"
+        ? (item as { password?: string }).password!
+        : "";
+
+      if (!email || !password) continue;
+
+      uniqueByEmail.set(email, {
+        email,
+        name: name || email,
+        password,
+      });
+    }
+
+    return Array.from(uniqueByEmail.values());
+  } catch (error) {
+    console.error("[startup] Invalid BOOTSTRAP_AUTH_USERS_JSON:", error);
+    return [];
+  }
 }
 
 async function resolveNonstopTimerState() {
@@ -141,18 +273,24 @@ export async function registerRoutes(
   app.use(express.json({ limit: '100mb' }));
   app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-  // Trust proxy for production (Replit uses reverse proxy)
-  app.set('trust proxy', 1);
+  if (IS_PRODUCTION) {
+    // In production we are usually behind a reverse proxy.
+    app.set("trust proxy", 1);
+  }
 
   // Set up session middleware
+  const configuredSessionSecret = process.env.SESSION_SECRET?.trim();
+  if (IS_PRODUCTION && !configuredSessionSecret) {
+    throw new Error("SESSION_SECRET is required in production.");
+  }
   const sessionConfig: session.SessionOptions = {
-    secret: process.env.SESSION_SECRET || 'padel-club-secret',
+    secret: configuredSessionSecret || "dev-session-secret-change-me",
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: true,
+      secure: IS_PRODUCTION,
       httpOnly: true,
-      sameSite: 'none',
+      sameSite: IS_PRODUCTION ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     },
   };
@@ -197,22 +335,31 @@ export async function registerRoutes(
 
   // Auth routes
   app.post("/api/auth/login", async (req, res) => {
+    if (enforceLoginRateLimit(req, res)) {
+      return;
+    }
+
     try {
       const { email, password } = loginSchema.parse(req.body);
-      const user = await storage.getAuthorizedUserByEmail(email);
+      const user = await storage.getAuthorizedUserByEmail(normalizeEmail(email));
       
       if (!user) {
+        registerFailedLogin(req);
         return res.status(401).json({ message: "Email ou palavra-passe incorretos" });
       }
       
       if (!user.password) {
+        registerFailedLogin(req);
         return res.status(401).json({ message: "Email ou palavra-passe incorretos" });
       }
       
       const isValid = await bcrypt.compare(password, user.password);
       if (!isValid) {
+        registerFailedLogin(req);
         return res.status(401).json({ message: "Email ou palavra-passe incorretos" });
       }
+
+      clearLoginRateLimit(req);
       
       (req.session as any).userId = user.id;
       (req.session as any).userEmail = user.email;
@@ -224,6 +371,7 @@ export async function registerRoutes(
       });
     } catch (err) {
       if (err instanceof z.ZodError) {
+        registerFailedLogin(req);
         return res.status(400).json({ message: err.errors[0].message });
       }
       res.status(500).json({ message: "Erro interno" });
@@ -348,9 +496,19 @@ export async function registerRoutes(
   });
 
   app.delete(api.players.delete.path, isAuthenticated, async (req, res) => {
-    const id = Number(req.params.id);
-    await storage.deletePlayer(id);
-    res.status(204).end();
+    try {
+      const id = Number(req.params.id);
+      await storage.deletePlayer(id);
+      res.status(204).end();
+    } catch (err: any) {
+      if (err?.code === "23503" || err?.code === "23514") {
+        return res.status(400).json({
+          message: "Nao e possivel apagar este jogador porque esta associado a dados do Non Stop.",
+        });
+      }
+      console.error("[players/delete] error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
   });
 
   app.get("/api/nonstop/current", isAuthenticated, async (_req, res) => {
@@ -418,6 +576,16 @@ export async function registerRoutes(
           field: err.errors[0].path.join('.'),
         });
       }
+      if (err instanceof Error && err.message === "PLAYER_ALREADY_ASSIGNED") {
+        return res.status(400).json({
+          message: "Um dos jogadores ja pertence a outra dupla neste evento.",
+        });
+      }
+      if (err instanceof Error && err.message === "PLAYER_NOT_FOUND") {
+        return res.status(400).json({
+          message: "Um dos jogadores selecionados nao existe.",
+        });
+      }
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -433,6 +601,16 @@ export async function registerRoutes(
         return res.status(400).json({
           message: err.errors[0].message,
           field: err.errors[0].path.join('.'),
+        });
+      }
+      if (err instanceof Error && err.message === "PLAYER_ALREADY_ASSIGNED") {
+        return res.status(400).json({
+          message: "Um dos jogadores ja pertence a outra dupla neste evento.",
+        });
+      }
+      if (err instanceof Error && err.message === "PLAYER_NOT_FOUND") {
+        return res.status(400).json({
+          message: "Um dos jogadores selecionados nao existe.",
         });
       }
       res.status(500).json({ message: "Internal server error" });
@@ -456,12 +634,34 @@ export async function registerRoutes(
   });
 
   app.post("/api/results", isAuthenticated, async (req, res) => {
-    const { teamAId, teamBId } = req.body;
-    if (!Number.isInteger(teamAId) || !Number.isInteger(teamBId) || teamAId < 1 || teamBId < 1) {
-      return res.status(400).json({ message: "Valid team IDs are required" });
+    try {
+      const input = insertNonstopResultSchema.parse(req.body);
+
+      if (input.scoreA < 0 || input.scoreB < 0) {
+        return res.status(400).json({ message: "Os resultados nao podem ser negativos." });
+      }
+      if ((input.round ?? 1) < 1 || (input.court ?? 1) < 1) {
+        return res.status(400).json({ message: "Ronda e campo devem ser maiores que zero." });
+      }
+
+      const result = await storage.createOrUpdateResult(input);
+      res.status(201).json(result);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join('.'),
+        });
+      }
+      if (err instanceof Error && err.message === "RESULT_SAME_TEAM") {
+        return res.status(400).json({ message: "As equipas A e B devem ser diferentes." });
+      }
+      if (err instanceof Error && err.message === "RESULT_TEAM_NOT_IN_EVENT") {
+        return res.status(400).json({ message: "Uma das equipas selecionadas nao pertence ao evento atual." });
+      }
+      console.error("[results/create] error:", err);
+      res.status(500).json({ message: "Internal server error" });
     }
-    const result = await storage.createOrUpdateResult(req.body);
-    res.status(201).json(result);
   });
 
   app.post("/api/results/clear", isAuthenticated, async (_req, res) => {
@@ -477,6 +677,82 @@ export async function registerRoutes(
   app.post("/api/settings", isAuthenticated, async (req, res) => {
     const settings = await storage.updateSettings(req.body);
     res.json(settings);
+  });
+
+  app.get("/api/ranking", isAuthenticated, async (req, res) => {
+    try {
+      const onlyWithPoints = String(req.query.onlyWithPoints ?? "1") !== "0";
+      const requestedSeason = parseSeasonYear(req.query.season);
+      const availableSeasons = await storage.getRankingSeasons();
+      const currentSeason = getLisbonYear();
+      const season = requestedSeason ?? availableSeasons[0] ?? currentSeason;
+      const leaderboard = await storage.getRankingLeaderboard(season);
+      const filtered = onlyWithPoints
+        ? leaderboard.filter((row) => row.totalPoints !== 0 || row.participationCount > 0 || row.roundWins > 0)
+        : leaderboard;
+
+      res.json({
+        season,
+        availableSeasons,
+        rules: {
+          participation: 2,
+          roundWin: 3,
+          loss: 0,
+        },
+        items: filtered.map((row, index) => ({
+          position: index + 1,
+          ...row,
+        })),
+      });
+    } catch (err) {
+      console.error("[ranking/list] error:", err);
+      res.status(500).json({ message: "Erro ao carregar ranking" });
+    }
+  });
+
+  app.get("/api/ranking/entries", isAuthenticated, async (req, res) => {
+    try {
+      const playerId = parseEventId(req.query.playerId);
+      const season = parseSeasonYear(req.query.season);
+      const entries = await storage.getRankingEntries(playerId, season);
+      res.json(entries);
+    } catch (err) {
+      console.error("[ranking/entries] error:", err);
+      res.status(500).json({ message: "Erro ao carregar historico de pontos" });
+    }
+  });
+
+  app.post("/api/ranking/import", isAuthenticated, async (req, res) => {
+    try {
+      const input = rankingImportSchema.parse(req.body);
+      const existingPlayers = await storage.getPlayers();
+      const existingIds = new Set(existingPlayers.map((player) => player.id));
+      const invalidRows = input.rows.filter((row) => !existingIds.has(row.playerId));
+
+      if (invalidRows.length > 0) {
+        return res.status(400).json({
+          message: "Existem jogadores invalidos na importacao",
+          invalidPlayerIds: invalidRows.map((row) => row.playerId),
+        });
+      }
+
+      const inserted = await storage.importRankingBasePoints(input.rows, {
+        batchLabel: input.batchLabel,
+        seasonYear: input.seasonYear,
+        userEmail: (req.session as any)?.userEmail ?? null,
+      });
+
+      res.json({ success: true, inserted });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join("."),
+        });
+      }
+      console.error("[ranking/import] error:", err);
+      res.status(500).json({ message: "Erro ao importar pontos iniciais" });
+    }
   });
 
   app.get("/api/nonstop/timer", isAuthenticated, async (_req, res) => {
@@ -775,6 +1051,16 @@ export async function registerRoutes(
     `);
 
     await db.execute(sql`
+      ALTER TABLE teams
+      ADD COLUMN IF NOT EXISTS player_a_id INTEGER
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE teams
+      ADD COLUMN IF NOT EXISTS player_b_id INTEGER
+    `);
+
+    await db.execute(sql`
       ALTER TABLE nonstop_results
       ADD COLUMN IF NOT EXISTS event_id INTEGER
     `);
@@ -852,6 +1138,28 @@ export async function registerRoutes(
     `);
 
     await db.execute(sql`
+      WITH ranked AS (
+        SELECT
+          id,
+          ROW_NUMBER() OVER (
+            PARTITION BY event_id, round, court
+            ORDER BY id DESC
+          ) AS rn
+        FROM nonstop_results
+        WHERE event_id IS NOT NULL
+      )
+      DELETE FROM nonstop_results nr
+      USING ranked r
+      WHERE nr.id = r.id
+        AND r.rn > 1
+    `);
+
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_results_event_round_court_unique
+      ON nonstop_results (event_id, round, court)
+    `);
+
+    await db.execute(sql`
       CREATE TABLE IF NOT EXISTS settings (
         id SERIAL PRIMARY KEY,
         club_name TEXT NOT NULL DEFAULT 'Now Padel & Fit',
@@ -876,6 +1184,419 @@ export async function registerRoutes(
         tie_breaker TEXT NOT NULL DEFAULT 'direct',
         player_profile_options TEXT NOT NULL DEFAULT '["Academia","Fecha jogos","Non Stop"]'
       )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ranking_entries (
+        id SERIAL PRIMARY KEY,
+        player_id INTEGER NOT NULL,
+        season_year INTEGER NOT NULL,
+        event_id INTEGER,
+        round INTEGER,
+        points INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        reason_key TEXT NOT NULL,
+        note TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_ranking_entries_player_id
+      ON ranking_entries (player_id)
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE ranking_entries
+      ADD COLUMN IF NOT EXISTS season_year INTEGER
+    `);
+
+    await db.execute(sql`
+      UPDATE ranking_entries re
+      SET season_year = EXTRACT(YEAR FROM (COALESCE(ne.started_at, ne.created_at) AT TIME ZONE 'Europe/Lisbon'))::INTEGER
+      FROM nonstop_events ne
+      WHERE re.event_id = ne.id
+        AND re.season_year IS NULL
+    `);
+
+    await db.execute(sql`
+      UPDATE ranking_entries
+      SET season_year = EXTRACT(YEAR FROM (created_at AT TIME ZONE 'Europe/Lisbon'))::INTEGER
+      WHERE season_year IS NULL
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE ranking_entries
+      ALTER COLUMN season_year SET NOT NULL
+    `);
+
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_ranking_entries_season_year
+      ON ranking_entries (season_year DESC)
+    `);
+
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ranking_entries_reason_key
+      ON ranking_entries (reason_key)
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'fk_teams_event_id_nonstop_events'
+        ) THEN
+          ALTER TABLE teams
+          ADD CONSTRAINT fk_teams_event_id_nonstop_events
+          FOREIGN KEY (event_id)
+          REFERENCES nonstop_events(id)
+          ON DELETE CASCADE
+          NOT VALID;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      DECLARE existing_definition TEXT;
+      BEGIN
+        SELECT pg_get_constraintdef(oid)
+        INTO existing_definition
+        FROM pg_constraint
+        WHERE conname = 'fk_teams_player_a_id_players';
+
+        IF existing_definition LIKE '%ON DELETE SET NULL%' THEN
+          ALTER TABLE teams
+          DROP CONSTRAINT fk_teams_player_a_id_players;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'fk_teams_player_a_id_players'
+        ) THEN
+          ALTER TABLE teams
+          ADD CONSTRAINT fk_teams_player_a_id_players
+          FOREIGN KEY (player_a_id)
+          REFERENCES players(id)
+          ON DELETE RESTRICT
+          NOT VALID;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      DECLARE existing_definition TEXT;
+      BEGIN
+        SELECT pg_get_constraintdef(oid)
+        INTO existing_definition
+        FROM pg_constraint
+        WHERE conname = 'fk_teams_player_b_id_players';
+
+        IF existing_definition LIKE '%ON DELETE SET NULL%' THEN
+          ALTER TABLE teams
+          DROP CONSTRAINT fk_teams_player_b_id_players;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'fk_teams_player_b_id_players'
+        ) THEN
+          ALTER TABLE teams
+          ADD CONSTRAINT fk_teams_player_b_id_players
+          FOREIGN KEY (player_b_id)
+          REFERENCES players(id)
+          ON DELETE RESTRICT
+          NOT VALID;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      DECLARE existing_definition TEXT;
+      BEGIN
+        SELECT pg_get_constraintdef(oid)
+        INTO existing_definition
+        FROM pg_constraint
+        WHERE conname = 'fk_ranking_entries_player_id_players';
+
+        IF existing_definition LIKE '%ON DELETE CASCADE%' THEN
+          ALTER TABLE ranking_entries
+          DROP CONSTRAINT fk_ranking_entries_player_id_players;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'fk_ranking_entries_player_id_players'
+        ) THEN
+          ALTER TABLE ranking_entries
+          ADD CONSTRAINT fk_ranking_entries_player_id_players
+          FOREIGN KEY (player_id)
+          REFERENCES players(id)
+          ON DELETE RESTRICT
+          NOT VALID;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'fk_ranking_entries_event_id_nonstop_events'
+        ) THEN
+          ALTER TABLE ranking_entries
+          ADD CONSTRAINT fk_ranking_entries_event_id_nonstop_events
+          FOREIGN KEY (event_id)
+          REFERENCES nonstop_events(id)
+          ON DELETE SET NULL
+          NOT VALID;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'fk_nonstop_results_event_id_nonstop_events'
+        ) THEN
+          ALTER TABLE nonstop_results
+          ADD CONSTRAINT fk_nonstop_results_event_id_nonstop_events
+          FOREIGN KEY (event_id)
+          REFERENCES nonstop_events(id)
+          ON DELETE CASCADE
+          NOT VALID;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'fk_nonstop_results_team_a_id_teams'
+        ) THEN
+          ALTER TABLE nonstop_results
+          ADD CONSTRAINT fk_nonstop_results_team_a_id_teams
+          FOREIGN KEY (team_a_id)
+          REFERENCES teams(id)
+          ON DELETE CASCADE
+          NOT VALID;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'fk_nonstop_results_team_b_id_teams'
+        ) THEN
+          ALTER TABLE nonstop_results
+          ADD CONSTRAINT fk_nonstop_results_team_b_id_teams
+          FOREIGN KEY (team_b_id)
+          REFERENCES teams(id)
+          ON DELETE CASCADE
+          NOT VALID;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'chk_teams_players_not_null'
+        ) THEN
+          ALTER TABLE teams
+          ADD CONSTRAINT chk_teams_players_not_null
+          CHECK (player_a_id IS NOT NULL AND player_b_id IS NOT NULL)
+          NOT VALID;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'chk_teams_players_different'
+        ) THEN
+          ALTER TABLE teams
+          ADD CONSTRAINT chk_teams_players_different
+          CHECK (player_a_id <> player_b_id)
+          NOT VALID;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_teams_event_id_nonstop_events') THEN
+          BEGIN
+            ALTER TABLE teams VALIDATE CONSTRAINT fk_teams_event_id_nonstop_events;
+          EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not validate fk_teams_event_id_nonstop_events: %', SQLERRM;
+          END;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_teams_player_a_id_players') THEN
+          BEGIN
+            ALTER TABLE teams VALIDATE CONSTRAINT fk_teams_player_a_id_players;
+          EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not validate fk_teams_player_a_id_players: %', SQLERRM;
+          END;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_teams_player_b_id_players') THEN
+          BEGIN
+            ALTER TABLE teams VALIDATE CONSTRAINT fk_teams_player_b_id_players;
+          EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not validate fk_teams_player_b_id_players: %', SQLERRM;
+          END;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_ranking_entries_player_id_players') THEN
+          BEGIN
+            ALTER TABLE ranking_entries VALIDATE CONSTRAINT fk_ranking_entries_player_id_players;
+          EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not validate fk_ranking_entries_player_id_players: %', SQLERRM;
+          END;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_ranking_entries_event_id_nonstop_events') THEN
+          BEGIN
+            ALTER TABLE ranking_entries VALIDATE CONSTRAINT fk_ranking_entries_event_id_nonstop_events;
+          EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not validate fk_ranking_entries_event_id_nonstop_events: %', SQLERRM;
+          END;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_nonstop_results_event_id_nonstop_events') THEN
+          BEGIN
+            ALTER TABLE nonstop_results VALIDATE CONSTRAINT fk_nonstop_results_event_id_nonstop_events;
+          EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not validate fk_nonstop_results_event_id_nonstop_events: %', SQLERRM;
+          END;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_nonstop_results_team_a_id_teams') THEN
+          BEGIN
+            ALTER TABLE nonstop_results VALIDATE CONSTRAINT fk_nonstop_results_team_a_id_teams;
+          EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not validate fk_nonstop_results_team_a_id_teams: %', SQLERRM;
+          END;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_nonstop_results_team_b_id_teams') THEN
+          BEGIN
+            ALTER TABLE nonstop_results VALIDATE CONSTRAINT fk_nonstop_results_team_b_id_teams;
+          EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not validate fk_nonstop_results_team_b_id_teams: %', SQLERRM;
+          END;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_teams_players_not_null') THEN
+          BEGIN
+            ALTER TABLE teams VALIDATE CONSTRAINT chk_teams_players_not_null;
+          EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not validate chk_teams_players_not_null: %', SQLERRM;
+          END;
+        END IF;
+      END
+      $$;
+    `);
+
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_teams_players_different') THEN
+          BEGIN
+            ALTER TABLE teams VALIDATE CONSTRAINT chk_teams_players_different;
+          EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not validate chk_teams_players_different: %', SQLERRM;
+          END;
+        END IF;
+      END
+      $$;
     `);
 
     await db.execute(sql`
@@ -908,10 +1629,7 @@ export async function registerRoutes(
       )
     `);
 
-    const bootstrapUsers = [
-      { email: "marcelo_cristovao@live.com.pt", name: "Marcelo Cristovao", password: "Teste1" },
-      { email: "nowpadel@gmail.com", name: "Now Padel", password: "teste1" },
-    ];
+    const bootstrapUsers = loadBootstrapUsersFromEnv();
 
     for (const bootstrap of bootstrapUsers) {
       let bootstrapUser = await storage.getAuthorizedUserByEmail(bootstrap.email);
@@ -926,6 +1644,15 @@ export async function registerRoutes(
         const hashedPassword = await bcrypt.hash(bootstrap.password, 10);
         await storage.setUserPassword(bootstrapUser.id, hashedPassword);
       }
+    }
+
+    if (bootstrapUsers.length > 0) {
+      console.log(`[startup] processed ${bootstrapUsers.length} bootstrap auth user(s) from BOOTSTRAP_AUTH_USERS_JSON`);
+    }
+
+    const authorizedUsers = await storage.getAuthorizedUsers();
+    if (authorizedUsers.length === 0) {
+      console.warn("[startup] no authorized users found. Define BOOTSTRAP_AUTH_USERS_JSON before first login.");
     }
     const existing = await storage.getPlayers();
     if (existing.length === 0) {

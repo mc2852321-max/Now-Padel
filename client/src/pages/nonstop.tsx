@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Team, NonstopResult, Settings, NonstopTimer, insertTeamSchema } from "@shared/schema";
+import { Team, Player, NonstopResult, Settings, NonstopTimer, insertTeamSchema } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -9,9 +9,10 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { fetchAllPlayers, type PlayersPageResponse } from "@/lib/players";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, Calendar as CalendarIcon, History } from "lucide-react";
-import * as XLSX from "xlsx-js-style";
+import * as XLSX from "xlsx";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -103,6 +104,55 @@ export default function Nonstop() {
     refetchInterval: 3000,
     refetchOnWindowFocus: true,
   });
+
+  const playersQuery = useQuery<PlayersPageResponse>({
+    queryKey: ["/api/players", "all"],
+    queryFn: fetchAllPlayers,
+    refetchInterval: 10000,
+    refetchOnWindowFocus: true,
+  });
+  const playersPage = playersQuery.data;
+  const playersErrorMessage = playersQuery.error instanceof Error
+    ? playersQuery.error.message
+    : null;
+  const playersErrorToastRef = useRef<{ message: string; at: number } | null>(null);
+
+  useEffect(() => {
+    if (!playersErrorMessage) return;
+    const now = Date.now();
+    const lastToast = playersErrorToastRef.current;
+    if (lastToast && lastToast.message === playersErrorMessage && now - lastToast.at < 30000) {
+      return;
+    }
+    playersErrorToastRef.current = { message: playersErrorMessage, at: now };
+    toast({
+      title: "Erro ao carregar jogadores",
+      description: playersErrorMessage,
+      variant: "destructive",
+    });
+  }, [playersErrorMessage, toast]);
+
+  const availablePlayers = playersPage?.items ?? [];
+  const playersById = useMemo(
+    () => new Map(availablePlayers.map((player) => [player.id, player])),
+    [availablePlayers],
+  );
+  const getLinkedPlayersDisplay = (team: Team) => {
+    const linkedPlayers = [team.playerAId, team.playerBId]
+      .filter((id): id is number => typeof id === "number" && id > 0)
+      .map((id) => playersById.get(id))
+      .filter((player): player is Player => Boolean(player))
+      .map((player) => `${player.name} (${player.level})`);
+
+    if (linkedPlayers.length === 0) return null;
+    return linkedPlayers.join(" / ");
+  };
+
+  const getTeamOptionLabel = (team: Team) => {
+    const linkedPlayers = getLinkedPlayersDisplay(team);
+    if (!linkedPlayers) return normalizeTeamName(team.name);
+    return `${normalizeTeamName(team.name)} - ${linkedPlayers}`;
+  };
 
   const teamsQueryKey = readOnlyMode && selectedHistoryEventId
     ? `/api/teams?eventId=${selectedHistoryEventId}`
@@ -721,6 +771,8 @@ export default function Nonstop() {
       const res = await apiRequest("POST", "/api/teams", {
         ...data,
         name: normalizeTeamName(data.name || ""),
+        playerAId: Number(data.playerAId),
+        playerBId: Number(data.playerBId),
       });
       return res.json();
     },
@@ -740,7 +792,14 @@ export default function Nonstop() {
       queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
       queryClient.invalidateQueries({ queryKey: ["/api/results"] });
       toast({ title: "Sucesso", description: "Equipa adicionada" });
-    }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro",
+        description: error?.message || "Nao foi possivel adicionar a dupla.",
+        variant: "destructive",
+      });
+    },
   });
 
   const updateTeamMutation = useMutation({
@@ -749,6 +808,8 @@ export default function Nonstop() {
       const res = await apiRequest("PATCH", `/api/teams/${id}`, {
         ...data,
         name: normalizeTeamName(data.name || ""),
+        playerAId: Number(data.playerAId),
+        playerBId: Number(data.playerBId),
       });
       return res.json();
     },
@@ -757,6 +818,13 @@ export default function Nonstop() {
       queryClient.invalidateQueries({ queryKey: ["/api/results"] });
       setEditingTeam(null);
       toast({ title: "Sucesso", description: "Dupla atualizada" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro",
+        description: error?.message || "Nao foi possivel atualizar a dupla.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -1279,7 +1347,14 @@ export default function Nonstop() {
         "flex flex-col md:flex-row md:items-center justify-between gap-4",
         isPresentationMode && "sticky top-0 z-50 bg-background/95 px-1 py-1 border rounded-md gap-2 max-[900px]:py-0.5 max-[900px]:gap-1"
       )}>
-        <h2 className={cn("text-3xl font-bold tracking-tight uppercase", isPresentationMode && "hidden")}>Nonstop {numCourts} Campos</h2>
+        <div className={cn("space-y-1", isPresentationMode && "hidden")}>
+          <h2 className="text-3xl font-bold tracking-tight uppercase">Nonstop {numCourts} Campos</h2>
+          {playersErrorMessage && (
+            <p className="text-sm text-red-600">
+              Nao foi possivel carregar todos os jogadores. Tenta novamente dentro de instantes.
+            </p>
+          )}
+        </div>
         
         <div className="flex flex-wrap items-center gap-2">
           <div className={cn("w-full sm:w-auto flex flex-wrap items-center gap-2", isPresentationMode && "hidden")}>
@@ -1642,7 +1717,12 @@ export default function Nonstop() {
             </DialogTrigger>
             <DialogContent>
               <DialogHeader><DialogTitle>Adicionar dupla</DialogTitle></DialogHeader>
-              <TeamForm onSubmit={(data) => createTeamMutation.mutate(data)} key={teams?.length || 0} />
+              <TeamForm
+                players={availablePlayers}
+                teams={teams || []}
+                onSubmit={(data) => createTeamMutation.mutate(data)}
+                key={teams?.length || 0}
+              />
             </DialogContent>
             </Dialog>
           </div>
@@ -1669,7 +1749,20 @@ export default function Nonstop() {
                   <TableBody>
                     {(teams || []).map((team) => (
                       <TableRow key={team.id}>
-                        <TableCell className="font-medium">{team.name}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="space-y-0.5">
+                            <p>{team.name}</p>
+                            {(() => {
+                              const linkedPlayers = getLinkedPlayersDisplay(team);
+                              if (!linkedPlayers) return null;
+                              return (
+                                <p className="text-xs text-muted-foreground">
+                                  {linkedPlayers}
+                                </p>
+                              );
+                            })()}
+                          </div>
+                        </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             <Button
@@ -1819,7 +1912,11 @@ export default function Nonstop() {
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
-                                {teams?.map(t => <SelectItem className="font-np-body" key={t.id} value={t.id.toString()}>{normalizeTeamName(t.name)}</SelectItem>)}
+                                {teams?.map((t) => (
+                                  <SelectItem className="font-np-body" key={t.id} value={t.id.toString()}>
+                                    {getTeamOptionLabel(t)}
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </TableCell>
@@ -1868,7 +1965,11 @@ export default function Nonstop() {
                                 <SelectValue className="block truncate text-left" placeholder="Selecionar Equipa" />
                               </SelectTrigger>
                               <SelectContent>
-                                {teams?.map(t => <SelectItem className="font-np-body" key={t.id} value={t.id.toString()}>{normalizeTeamName(t.name)}</SelectItem>)}
+                                {teams?.map((t) => (
+                                  <SelectItem className="font-np-body" key={t.id} value={t.id.toString()}>
+                                    {getTeamOptionLabel(t)}
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </TableCell>
@@ -1920,6 +2021,9 @@ export default function Nonstop() {
           </DialogHeader>
           {editingTeam && (
             <TeamForm
+              players={availablePlayers}
+              teams={teams || []}
+              editingTeamId={editingTeam.id}
               defaultValues={editingTeam}
               submitLabel="Guardar alterações"
               onSubmit={(data) => updateTeamMutation.mutate({ id: editingTeam.id, data })}
@@ -1933,30 +2037,148 @@ export default function Nonstop() {
 
 function TeamForm({
   onSubmit,
+  players,
+  teams,
+  editingTeamId,
   defaultValues,
   submitLabel = "Adicionar",
 }: {
   onSubmit: (data: any) => void;
+  players: Player[];
+  teams: Team[];
+  editingTeamId?: number;
   defaultValues?: Partial<Team>;
   submitLabel?: string;
 }) {
+  const playersById = useMemo(
+    () => new Map(players.map((player) => [player.id, player])),
+    [players],
+  );
+
   const form = useForm({
     resolver: zodResolver(insertTeamSchema),
     defaultValues: {
       name: defaultValues?.name || "",
+      playerAId: typeof defaultValues?.playerAId === "number" ? defaultValues.playerAId : undefined,
+      playerBId: typeof defaultValues?.playerBId === "number" ? defaultValues.playerBId : undefined,
     },
   });
+  const selectedPlayerAId = form.watch("playerAId");
+  const selectedPlayerBId = form.watch("playerBId");
+  const occupiedPlayerIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const team of teams) {
+      if (typeof editingTeamId === "number" && team.id === editingTeamId) continue;
+      if (typeof team.playerAId === "number") ids.add(team.playerAId);
+      if (typeof team.playerBId === "number") ids.add(team.playerBId);
+    }
+    return ids;
+  }, [teams, editingTeamId]);
+
+  const applyAutoName = () => {
+    const nameA = typeof selectedPlayerAId === "number" ? playersById.get(selectedPlayerAId)?.name : null;
+    const nameB = typeof selectedPlayerBId === "number" ? playersById.get(selectedPlayerBId)?.name : null;
+    if (!nameA || !nameB) return;
+    form.setValue("name", normalizeTeamName(`${nameA} / ${nameB}`), { shouldDirty: true });
+  };
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <FormField
+            control={form.control}
+            name="playerAId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Jogador A</FormLabel>
+                <Select
+                  value={typeof field.value === "number" ? String(field.value) : undefined}
+                  onValueChange={(value) => field.onChange(Number(value))}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecionar jogador" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {players.map((player) => (
+                      <SelectItem
+                        key={`team-player-a-${player.id}`}
+                        value={String(player.id)}
+                        disabled={
+                          selectedPlayerBId === player.id ||
+                          (occupiedPlayerIds.has(player.id) && selectedPlayerAId !== player.id)
+                        }
+                      >
+                        {player.name} ({player.level})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="playerBId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Jogador B</FormLabel>
+                <Select
+                  value={typeof field.value === "number" ? String(field.value) : undefined}
+                  onValueChange={(value) => field.onChange(Number(value))}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecionar jogador" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {players.map((player) => (
+                      <SelectItem
+                        key={`team-player-b-${player.id}`}
+                        value={String(player.id)}
+                        disabled={
+                          selectedPlayerAId === player.id ||
+                          (occupiedPlayerIds.has(player.id) && selectedPlayerBId !== player.id)
+                        }
+                      >
+                        {player.name} ({player.level})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
         <FormField
           control={form.control}
           name="name"
           render={({ field }) => (
             <FormItem>
               <FormLabel>Nome da dupla</FormLabel>
-              <FormControl><Input placeholder="Ex: João e Maria" {...field} /></FormControl>
+              <div className="space-y-2">
+                <FormControl><Input placeholder="Ex: Joao e Maria" {...field} /></FormControl>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={applyAutoName}
+                  disabled={!(selectedPlayerAId && selectedPlayerBId)}
+                >
+                  Usar nomes dos jogadores
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Cada jogador so pode pertencer a uma dupla por evento.
+                </p>
+              </div>
               <FormMessage />
             </FormItem>
           )}

@@ -1,5 +1,5 @@
-import { Users, MessageSquare, Settings, Trophy } from "lucide-react";
-import { useLocation } from "wouter";
+import { Users, MessageSquare, Settings, Trophy, Medal } from "lucide-react";
+import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import type { Settings as SettingsType } from "@shared/schema";
 import {
@@ -24,6 +24,11 @@ const items = [
     title: "Non Stop",
     url: "/nonstop",
     icon: Trophy,
+  },
+  {
+    title: "Ranking",
+    url: "/ranking",
+    icon: Medal,
   },
   {
     title: "Mensagens",
@@ -68,10 +73,10 @@ export function AppSidebar() {
                     isActive={location === item.url}
                     tooltip={item.title}
                   >
-                    <a href={item.url}>
+                    <Link href={item.url}>
                       <item.icon className="w-5 h-5" />
                       <span>{item.title}</span>
-                    </a>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

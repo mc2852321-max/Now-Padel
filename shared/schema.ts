@@ -27,6 +27,8 @@ export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   eventId: integer("event_id"),
+  playerAId: integer("player_a_id"),
+  playerBId: integer("player_b_id"),
 });
 
 export const nonstopResults = pgTable("nonstop_results", {
@@ -77,19 +79,56 @@ export const settings = pgTable("settings", {
   playerProfileOptions: text("player_profile_options").notNull().default("[\"Academia\",\"Fecha jogos\",\"Non Stop\"]"),
 });
 
+export const rankingEntries = pgTable("ranking_entries", {
+  id: serial("id").primaryKey(),
+  playerId: integer("player_id").notNull(),
+  seasonYear: integer("season_year").notNull(),
+  eventId: integer("event_id"),
+  round: integer("round"),
+  points: integer("points").notNull(),
+  reason: text("reason").notNull(),
+  reasonKey: text("reason_key").notNull(),
+  note: text("note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const insertPlayerSchema = createInsertSchema(players).omit({ id: true }).extend({
-  name: z.string().min(1, "O nome é obrigatório"),
-  phone: z.string().min(1, "O telemóvel é obrigatório"),
-  level: z.string().min(1, "O nível é obrigatório").refine((val) => val !== "placeholder", {
-    message: "Por favor, selecione um nível válido",
+  name: z.string().min(1, "O nome e obrigatorio"),
+  phone: z.string().min(1, "O telemovel e obrigatorio"),
+  level: z.string().min(1, "O nivel e obrigatorio").refine((val) => val !== "placeholder", {
+    message: "Por favor selecione um nivel valido",
   }),
 });
 
-export const insertTeamSchema = createInsertSchema(teams).omit({ id: true }).extend({
-  name: z.string().min(1, "O nome da equipa é obrigatório"),
-});
+export const insertTeamSchema = createInsertSchema(teams)
+  .omit({ id: true, eventId: true })
+  .extend({
+    name: z.string().min(1, "O nome da equipa e obrigatorio"),
+    playerAId: z.number({
+      required_error: "Seleciona o jogador A",
+      invalid_type_error: "Seleciona o jogador A",
+    }).int().positive(),
+    playerBId: z.number({
+      required_error: "Seleciona o jogador B",
+      invalid_type_error: "Seleciona o jogador B",
+    }).int().positive(),
+  })
+  .refine(
+    (data) =>
+      !(
+        typeof data.playerAId === "number" &&
+        typeof data.playerBId === "number" &&
+        data.playerAId === data.playerBId
+      ),
+    {
+      message: "Os jogadores da dupla devem ser diferentes",
+      path: ["playerBId"],
+    },
+  );
+
 export const insertNonstopResultSchema = createInsertSchema(nonstopResults).omit({ id: true, playedAt: true });
 export const insertNonstopEventSchema = createInsertSchema(nonstopEvents).omit({ id: true, createdAt: true });
+export const insertRankingEntrySchema = createInsertSchema(rankingEntries).omit({ id: true, createdAt: true });
 
 export type Player = typeof players.$inferSelect;
 export type InsertPlayer = z.infer<typeof insertPlayerSchema>;
@@ -99,6 +138,8 @@ export type NonstopResult = typeof nonstopResults.$inferSelect;
 export type InsertNonstopResult = z.infer<typeof insertNonstopResultSchema>;
 export type NonstopEvent = typeof nonstopEvents.$inferSelect;
 export type InsertNonstopEvent = z.infer<typeof insertNonstopEventSchema>;
+export type RankingEntry = typeof rankingEntries.$inferSelect;
+export type InsertRankingEntry = z.infer<typeof insertRankingEntrySchema>;
 export type NonstopTimer = typeof nonstopTimer.$inferSelect;
 export const insertNonstopTimerSchema = createInsertSchema(nonstopTimer).omit({ id: true, updatedAt: true });
 export type InsertNonstopTimer = z.infer<typeof insertNonstopTimerSchema>;
@@ -126,6 +167,20 @@ export const messageSchema = z.object({
 
 export type MessageRequest = z.infer<typeof messageSchema>;
 
+export const rankingImportRowSchema = z.object({
+  playerId: z.number().int().positive(),
+  points: z.number().int(),
+  note: z.string().optional(),
+});
+
+export const rankingImportSchema = z.object({
+  batchLabel: z.string().max(120).optional(),
+  seasonYear: z.number().int().min(2000).max(3000).optional(),
+  rows: z.array(rankingImportRowSchema).min(1),
+});
+
+export type RankingImportRequest = z.infer<typeof rankingImportSchema>;
+
 // Authorized users for access control
 export const authorizedUsers = pgTable("authorized_users", {
   id: serial("id").primaryKey(),
@@ -136,7 +191,7 @@ export const authorizedUsers = pgTable("authorized_users", {
 });
 
 export const insertAuthorizedUserSchema = createInsertSchema(authorizedUsers).omit({ id: true, addedAt: true, password: true }).extend({
-  email: z.string().email("Email inválido").min(1, "O email é obrigatório"),
+  email: z.string().email("Email invalido").min(1, "O email e obrigatorio"),
 });
 export type AuthorizedUser = typeof authorizedUsers.$inferSelect;
 export type InsertAuthorizedUser = z.infer<typeof insertAuthorizedUserSchema>;
@@ -148,14 +203,14 @@ export type CreateAuthorizedUserRequest = z.infer<typeof createAuthorizedUserReq
 
 // Login schema
 export const loginSchema = z.object({
-  email: z.string().email("Email inválido"),
-  password: z.string().min(1, "A password é obrigatória"),
+  email: z.string().email("Email invalido"),
+  password: z.string().min(1, "A password e obrigatoria"),
 });
 export type LoginRequest = z.infer<typeof loginSchema>;
 
 // Change password schema
 export const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1, "A password atual é obrigatória"),
+  currentPassword: z.string().min(1, "A password atual e obrigatoria"),
   newPassword: z.string().min(4, "A nova password deve ter pelo menos 4 caracteres"),
 });
 export type ChangePasswordRequest = z.infer<typeof changePasswordSchema>;

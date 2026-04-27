@@ -5,6 +5,7 @@ import {
   nonstopTimer,
   nonstopEvents,
   settings,
+  rankingEntries,
   authorizedUsers,
   type Player,
   type InsertPlayer,
@@ -18,6 +19,8 @@ import {
   type NonstopEvent,
   type Settings,
   type InsertSettings,
+  type RankingEntry,
+  type InsertRankingEntry,
   type AuthorizedUser,
   type InsertAuthorizedUser,
 } from "../shared/schema.js";
@@ -26,6 +29,7 @@ import { eq, and, or, ilike, desc, count, sql, inArray } from "drizzle-orm";
 
 type DbExecutor = typeof db;
 type NonstopEventStatus = "draft" | "active" | "completed" | "cancelled";
+const LISBON_TIMEZONE = "Europe/Lisbon";
 
 export type PlayersPage = {
   items: Player[];
@@ -46,6 +50,23 @@ export type NonstopEventDetails = {
   results: NonstopResult[];
   timer: NonstopTimer;
   snapshot: any | null;
+};
+
+export type RankingLeaderboardRow = {
+  playerId: number;
+  name: string;
+  level: string;
+  totalPoints: number;
+  importedPoints: number;
+  participationCount: number;
+  roundWins: number;
+  lastEntryAt: Date | null;
+};
+
+export type RankingImportRow = {
+  playerId: number;
+  points: number;
+  note?: string;
 };
 
 export interface IStorage {
@@ -81,6 +102,12 @@ export interface IStorage {
   getNonstopTimer(eventId?: number): Promise<NonstopTimer>;
   updateNonstopTimer(timer: Partial<InsertNonstopTimer>): Promise<NonstopTimer>;
   resetNonstop(): Promise<void>;
+
+  // Ranking
+  getRankingLeaderboard(seasonYear?: number): Promise<RankingLeaderboardRow[]>;
+  getRankingEntries(playerId?: number, seasonYear?: number): Promise<RankingEntry[]>;
+  getRankingSeasons(): Promise<number[]>;
+  importRankingBasePoints(rows: RankingImportRow[], opts?: { batchLabel?: string; seasonYear?: number; userEmail?: string | null }): Promise<number>;
 
   // Authorized Users
   getAuthorizedUsers(): Promise<AuthorizedUser[]>;
@@ -173,7 +200,168 @@ function computeStandings(
   });
 }
 
+const RANKING_POINTS = {
+  participation: 2,
+  roundWin: 3,
+} as const;
+
 export class DatabaseStorage implements IStorage {
+  private getLisbonYear(dateLike: Date | string | null | undefined): number {
+    const value = dateLike ? new Date(dateLike) : new Date();
+    if (Number.isNaN(value.getTime())) return new Date().getUTCFullYear();
+    const year = Number(new Intl.DateTimeFormat("en-CA", { timeZone: LISBON_TIMEZONE, year: "numeric" }).format(value));
+    if (!Number.isInteger(year)) return new Date().getUTCFullYear();
+    return year;
+  }
+
+  private getCurrentSeasonYear(): number {
+    return this.getLisbonYear(new Date());
+  }
+
+  private resolveSeasonYearInput(seasonYear?: number): number {
+    if (typeof seasonYear === "number" && Number.isInteger(seasonYear) && seasonYear >= 2000 && seasonYear <= 3000) {
+      return seasonYear;
+    }
+    return this.getCurrentSeasonYear();
+  }
+
+  private getSeasonYearFromEvent(event: Pick<NonstopEvent, "startedAt" | "createdAt">): number {
+    return this.getLisbonYear(event.startedAt ?? event.createdAt);
+  }
+
+  private getTeamPlayerIds(team: Team): number[] {
+    const ids = [team.playerAId, team.playerBId].filter((id): id is number => typeof id === "number" && id > 0);
+    return Array.from(new Set(ids));
+  }
+
+  private async createRankingEntry(
+    entry: InsertRankingEntry,
+    executor: DbExecutor = db,
+  ): Promise<boolean> {
+    const inserted = await executor
+      .insert(rankingEntries)
+      .values(entry)
+      .onConflictDoNothing({ target: [rankingEntries.reasonKey] })
+      .returning({ id: rankingEntries.id });
+
+    return inserted.length > 0;
+  }
+
+  private async validateTeamPlayersExist(
+    playerAId: number,
+    playerBId: number,
+    executor: DbExecutor = db,
+  ): Promise<void> {
+    const playerIds = Array.from(new Set([playerAId, playerBId]));
+    if (playerIds.length === 0) return;
+
+    const whereClause = playerIds.length > 1
+      ? inArray(players.id, playerIds)
+      : eq(players.id, playerIds[0]);
+
+    const existing = await executor
+      .select({ id: players.id })
+      .from(players)
+      .where(whereClause);
+
+    if (existing.length !== playerIds.length) {
+      throw new Error("PLAYER_NOT_FOUND");
+    }
+  }
+
+  private async validateTeamPlayersAvailability(
+    eventId: number,
+    playerAId: number,
+    playerBId: number,
+    excludeTeamId?: number,
+    executor: DbExecutor = db,
+  ): Promise<void> {
+    const playersToCheck = Array.from(new Set([playerAId, playerBId]));
+    if (playersToCheck.length === 0) return;
+
+    const playerConditions: any[] = [];
+    for (const playerId of playersToCheck) {
+      playerConditions.push(eq(teams.playerAId, playerId));
+      playerConditions.push(eq(teams.playerBId, playerId));
+    }
+
+    const whereClause = and(
+      eq(teams.eventId, eventId),
+      playerConditions.length > 1 ? or(...playerConditions)! : playerConditions[0],
+    );
+
+    const possibleConflicts = await executor.select().from(teams).where(whereClause);
+    const conflicts = typeof excludeTeamId === "number"
+      ? possibleConflicts.filter((team) => team.id !== excludeTeamId)
+      : possibleConflicts;
+
+    if (conflicts.length > 0) {
+      throw new Error("PLAYER_ALREADY_ASSIGNED");
+    }
+  }
+
+  private async awardRankingForCompletedEvent(
+    eventId: number,
+    seasonYear: number,
+    eventTeams: Team[],
+    eventResults: NonstopResult[],
+    executor: DbExecutor = db,
+  ): Promise<void> {
+    const teamPlayers = new Map<number, number[]>();
+    const participatingPlayers = new Set<number>();
+
+    for (const team of eventTeams) {
+      const playerIds = this.getTeamPlayerIds(team);
+      teamPlayers.set(team.id, playerIds);
+      for (const playerId of playerIds) {
+        participatingPlayers.add(playerId);
+      }
+    }
+
+    for (const playerId of Array.from(participatingPlayers)) {
+      await this.createRankingEntry(
+        {
+          playerId,
+          seasonYear,
+          eventId,
+          round: null,
+          points: RANKING_POINTS.participation,
+          reason: "participation",
+          reasonKey: `nonstop:${eventId}:participation:player:${playerId}`,
+          note: "Participacao no Non Stop",
+        },
+        executor,
+      );
+    }
+
+    for (const result of eventResults) {
+      const hasPlayed = result.scoreA > 0 || result.scoreB > 0;
+      if (!hasPlayed) continue;
+
+      let winnerTeamId: number | null = null;
+      if (result.scoreA > result.scoreB) winnerTeamId = result.teamAId;
+      if (result.scoreB > result.scoreA) winnerTeamId = result.teamBId;
+      if (!winnerTeamId) continue;
+
+      const winnerPlayers = teamPlayers.get(winnerTeamId) ?? [];
+      for (const playerId of winnerPlayers) {
+        await this.createRankingEntry(
+          {
+            playerId,
+            seasonYear,
+            eventId,
+            round: result.round,
+            points: RANKING_POINTS.roundWin,
+            reason: "round_win",
+            reasonKey: `nonstop:${eventId}:round:${result.round}:court:${result.court}:win:player:${playerId}`,
+            note: `Vitoria na ronda ${result.round}`,
+          },
+          executor,
+        );
+      }
+    }
+  }
+
   private async getOrCreateActiveEvent(executor: DbExecutor = db): Promise<NonstopEvent> {
     const active = await executor
       .select()
@@ -366,6 +554,15 @@ export class DatabaseStorage implements IStorage {
         },
         standings,
       });
+      const seasonYear = this.getSeasonYearFromEvent(activeEvent);
+
+      await this.awardRankingForCompletedEvent(
+        activeEvent.id,
+        seasonYear,
+        eventTeams,
+        eventResults,
+        tx as unknown as DbExecutor,
+      );
 
       await tx
         .update(nonstopEvents)
@@ -423,12 +620,31 @@ export class DatabaseStorage implements IStorage {
 
   async createTeam(insertTeam: InsertTeam): Promise<Team> {
     const active = await this.getOrCreateActiveEvent();
+    await this.validateTeamPlayersExist(
+      insertTeam.playerAId,
+      insertTeam.playerBId,
+    );
+    await this.validateTeamPlayersAvailability(
+      active.id,
+      insertTeam.playerAId,
+      insertTeam.playerBId,
+    );
     const [team] = await db.insert(teams).values({ ...insertTeam, eventId: active.id }).returning();
     return team;
   }
 
   async updateTeam(id: number, update: InsertTeam): Promise<Team> {
     const active = await this.getOrCreateActiveEvent();
+    await this.validateTeamPlayersExist(
+      update.playerAId,
+      update.playerBId,
+    );
+    await this.validateTeamPlayersAvailability(
+      active.id,
+      update.playerAId,
+      update.playerBId,
+      id,
+    );
     const [team] = await db
       .update(teams)
       .set(update)
@@ -448,41 +664,54 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(nonstopResults).where(eq(nonstopResults.eventId, active));
   }
 
+  private async validateResultTeamsForActiveEvent(
+    eventId: number,
+    teamAId: number,
+    teamBId: number,
+    executor: DbExecutor = db,
+  ): Promise<void> {
+    if (teamAId === teamBId) {
+      throw new Error("RESULT_SAME_TEAM");
+    }
+
+    const teamIds = Array.from(new Set([teamAId, teamBId]));
+    const existingTeams = await executor
+      .select({ id: teams.id })
+      .from(teams)
+      .where(and(eq(teams.eventId, eventId), inArray(teams.id, teamIds)));
+
+    if (existingTeams.length !== 2) {
+      throw new Error("RESULT_TEAM_NOT_IN_EVENT");
+    }
+  }
+
   async createOrUpdateResult(insertResult: InsertNonstopResult): Promise<NonstopResult> {
     const active = await this.getOrCreateActiveEvent();
     const round = insertResult.round ?? 1;
     const court = insertResult.court ?? 1;
+    await this.validateResultTeamsForActiveEvent(
+      active.id,
+      insertResult.teamAId,
+      insertResult.teamBId,
+    );
 
-    const [existing] = await db
-      .select()
-      .from(nonstopResults)
-      .where(and(eq(nonstopResults.eventId, active.id), eq(nonstopResults.round, round), eq(nonstopResults.court, court)));
-
-    if (existing) {
-      const [updated] = await db
-        .update(nonstopResults)
-        .set({
+    const [saved] = await db
+      .insert(nonstopResults)
+      .values({ ...insertResult, eventId: active.id, round, court })
+      .onConflictDoUpdate({
+        target: [nonstopResults.eventId, nonstopResults.round, nonstopResults.court],
+        set: {
           teamAId: insertResult.teamAId,
           teamBId: insertResult.teamBId,
           scoreA: insertResult.scoreA,
           scoreB: insertResult.scoreB,
-        })
-        .where(eq(nonstopResults.id, existing.id))
-        .returning();
-      if (updated.scoreA > 0 || updated.scoreB > 0) {
-        await this.ensureEventStarted(active.id);
-      }
-      return updated;
-    }
-
-    const [created] = await db
-      .insert(nonstopResults)
-      .values({ ...insertResult, eventId: active.id, round, court })
+        },
+      })
       .returning();
-    if (created.scoreA > 0 || created.scoreB > 0) {
+    if (saved.scoreA > 0 || saved.scoreB > 0) {
       await this.ensureEventStarted(active.id);
     }
-    return created;
+    return saved;
   }
 
   async clearResults(): Promise<void> {
@@ -536,6 +765,120 @@ export class DatabaseStorage implements IStorage {
 
   async resetNonstop(): Promise<void> {
     await this.finalizeAndStartNonstop();
+  }
+
+  async getRankingEntries(playerId?: number, seasonYear?: number): Promise<RankingEntry[]> {
+    const targetSeason = this.resolveSeasonYearInput(seasonYear);
+    const conditions: any[] = [eq(rankingEntries.seasonYear, targetSeason)];
+
+    if (typeof playerId === "number" && playerId > 0) {
+      conditions.push(eq(rankingEntries.playerId, playerId));
+    }
+
+    const whereClause = conditions.length > 1 ? and(...conditions)! : conditions[0];
+    return await db
+      .select()
+      .from(rankingEntries)
+      .where(whereClause)
+      .orderBy(desc(rankingEntries.createdAt), desc(rankingEntries.id));
+  }
+
+  async getRankingLeaderboard(seasonYear?: number): Promise<RankingLeaderboardRow[]> {
+    const targetSeason = this.resolveSeasonYearInput(seasonYear);
+    const [allPlayers, allEntries] = await Promise.all([
+      db.select().from(players),
+      db.select().from(rankingEntries).where(eq(rankingEntries.seasonYear, targetSeason)),
+    ]);
+
+    const totalsByPlayer = new Map<number, RankingLeaderboardRow>();
+    for (const player of allPlayers) {
+      totalsByPlayer.set(player.id, {
+        playerId: player.id,
+        name: player.name,
+        level: player.level,
+        totalPoints: 0,
+        importedPoints: 0,
+        participationCount: 0,
+        roundWins: 0,
+        lastEntryAt: null,
+      });
+    }
+
+    for (const entry of allEntries) {
+      const row = totalsByPlayer.get(entry.playerId);
+      if (!row) continue;
+
+      row.totalPoints += entry.points;
+      if (entry.reason === "import") row.importedPoints += entry.points;
+      if (entry.reason === "participation") row.participationCount += 1;
+      if (entry.reason === "round_win") row.roundWins += 1;
+      if (!row.lastEntryAt || entry.createdAt > row.lastEntryAt) {
+        row.lastEntryAt = entry.createdAt;
+      }
+    }
+
+    return Array.from(totalsByPlayer.values()).sort((a, b) => {
+      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+      return a.name.localeCompare(b.name, "pt-PT", { sensitivity: "base" });
+    });
+  }
+
+  async getRankingSeasons(): Promise<number[]> {
+    const currentSeason = this.getCurrentSeasonYear();
+    const rows = await db
+      .selectDistinct({ seasonYear: rankingEntries.seasonYear })
+      .from(rankingEntries)
+      .where(sql`${rankingEntries.seasonYear} IS NOT NULL`)
+      .orderBy(desc(rankingEntries.seasonYear));
+
+    const seasons = new Set<number>([currentSeason]);
+
+    for (const row of rows) {
+      if (typeof row.seasonYear === "number") {
+        seasons.add(row.seasonYear);
+      }
+    }
+
+    return Array.from(seasons).sort((a, b) => b - a);
+  }
+
+  async importRankingBasePoints(
+    rows: RankingImportRow[],
+    opts?: { batchLabel?: string; seasonYear?: number; userEmail?: string | null },
+  ): Promise<number> {
+    const cleanRows = rows
+      .filter((row) => Number.isInteger(row.playerId) && row.playerId > 0)
+      .filter((row) => Number.isInteger(row.points))
+      .filter((row) => row.points !== 0);
+
+    if (cleanRows.length === 0) return 0;
+
+    const batchLabel = (opts?.batchLabel ?? "").trim() || new Date().toISOString();
+    const seasonYear = this.resolveSeasonYearInput(opts?.seasonYear);
+    const userEmail = (opts?.userEmail ?? "").trim();
+
+    let inserted = 0;
+    await db.transaction(async (tx) => {
+      for (const row of cleanRows) {
+        const wasInserted = await this.createRankingEntry(
+          {
+            playerId: row.playerId,
+            seasonYear,
+            eventId: null,
+            round: null,
+            points: row.points,
+            reason: "import",
+            reasonKey: `import:${seasonYear}:${batchLabel}:player:${row.playerId}`,
+            note: row.note || (userEmail ? `Importado por ${userEmail}` : "Importacao de pontuacao inicial"),
+          },
+          tx as unknown as DbExecutor,
+        );
+
+        if (wasInserted) inserted += 1;
+      }
+    });
+
+    return inserted;
   }
 
   async getAuthorizedUsers(): Promise<AuthorizedUser[]> {

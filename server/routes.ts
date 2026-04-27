@@ -929,8 +929,8 @@ export async function registerRoutes(
     const teams = await storage.getTeams(eventId);
     const results = await storage.getResults(eventId);
     const settings = await storage.getSettings();
-    
-    const numRounds = settings?.nonstopRounds || 5;
+    const actualNumRounds = Math.max(0, ...results.map((result) => result.round || 0));
+    const numRounds = eventId ? Math.max(1, actualNumRounds || 1) : (settings?.nonstopRounds || 5);
     
     const standings: Record<number, { points: number; gamesWon: number; gamesLost: number; teamId: number; name: string; sequence: string[] }> = {};
     

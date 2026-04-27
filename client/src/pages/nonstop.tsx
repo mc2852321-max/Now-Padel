@@ -235,6 +235,22 @@ export default function Nonstop() {
   const warmupMinutes = settings?.warmupTime ?? 0;
   const gameMinutes = settings?.gameTime ?? 20;
   const totalRounds = settings?.nonstopRounds ?? 5;
+  const isSelectedHistoryMode = readOnlyMode && Boolean(selectedHistoryEventId);
+  const historyNumRounds = useMemo(
+    () => Math.max(0, ...(results ?? []).map((result) => result.round || 0)),
+    [results],
+  );
+  const historyNumCourts = useMemo(
+    () => Math.max(0, ...(results ?? []).map((result) => result.court || 0)),
+    [results],
+  );
+  const hasLoadedResults = Array.isArray(results);
+  const displayNumRounds = isSelectedHistoryMode && hasLoadedResults
+    ? Math.max(1, historyNumRounds || 1)
+    : numRounds;
+  const displayNumCourts = isSelectedHistoryMode && hasLoadedResults
+    ? Math.max(1, historyNumCourts || Math.ceil((teams?.length ?? 0) / 2) || 1)
+    : numCourts;
   const getEventsByDate = (date?: Date) => {
     if (!date) return [];
     const dayKey = toLisbonDayKey(date);
@@ -1374,6 +1390,7 @@ export default function Nonstop() {
       wsStandings["A2"].s = subtitleStyle;
       
       const headers = Object.keys(data.standings[0] || {});
+      const roundColumnCount = Math.max(0, headers.length - 6);
       XLSX.utils.sheet_add_aoa(wsStandings, [headers], { origin: "A4" });
       
       for (let C = 0; C < headers.length; C++) {
@@ -1436,7 +1453,7 @@ export default function Nonstop() {
         { wch: 6 },
         { wch: 6 },
         { wch: 6 },
-        ...Array(numRounds).fill({ wch: 5 })
+        ...Array(roundColumnCount).fill({ wch: 5 })
       ];
 
       wsStandings['!rows'] = [{ hpt: 28 }, { hpt: 18 }, { hpt: 12 }];
@@ -1544,7 +1561,7 @@ export default function Nonstop() {
     // Calculate sequences
     teams.forEach(team => {
       const teamStandings = standings[team.id];
-      for (let r = 1; r <= numRounds; r++) {
+      for (let r = 1; r <= displayNumRounds; r++) {
         const roundResult = results.find(res => res.round === r && (res.teamAId === team.id || res.teamBId === team.id));
         if (roundResult) {
           const isTeamA = roundResult.teamAId === team.id;
@@ -1584,9 +1601,6 @@ export default function Nonstop() {
   };
 
   const stats = getStandings();
-  const selectedEventTimeLabel = selectedHistoryEvent
-    ? toLisbonTimeKey(selectedHistoryEvent.startedAt ?? selectedHistoryEvent.createdAt)
-    : null;
   const daysWithEvents = events.map((event) => new Date(event.startedAt ?? event.createdAt));
 
   return (
@@ -1607,7 +1621,7 @@ export default function Nonstop() {
         isPresentationMode && "sticky top-0 z-50 bg-background/95 px-1 py-1 border rounded-md gap-2 max-[900px]:py-0.5 max-[900px]:gap-1"
       )}>
         <div className={cn("space-y-1", isPresentationMode && "hidden")}>
-          <h2 className="text-3xl font-bold tracking-tight uppercase">Nonstop {numCourts} Campos</h2>
+          <h2 className="text-3xl font-bold tracking-tight uppercase">Nonstop {displayNumCourts} Campos</h2>
           {playersErrorMessage && (
             <p className="text-sm text-red-600">
               Nao foi possivel carregar todos os jogadores. Tenta novamente dentro de instantes.
@@ -1616,10 +1630,16 @@ export default function Nonstop() {
         </div>
         
         <div className="flex flex-wrap items-center gap-2">
-          <div className={cn("w-full sm:w-auto flex flex-wrap items-center gap-2", isPresentationMode && "hidden")}>
+          <div
+            className={cn(
+              "w-full sm:w-auto flex flex-wrap items-center gap-1.5 rounded-xl border border-white/70 bg-white/70 p-1.5 shadow-sm backdrop-blur-md",
+              isPresentationMode && "hidden",
+            )}
+          >
             <ToggleGroup
               type="single"
               value={viewMode}
+              className="gap-1"
               onValueChange={(value) => {
                 if (!value) return;
                 const nextMode = value as "current" | "history";
@@ -1642,10 +1662,16 @@ export default function Nonstop() {
                 }
               }}
             >
-              <ToggleGroupItem value="current" className="h-9 px-3 text-[11px]">
+              <ToggleGroupItem
+                value="current"
+                className="h-11 rounded-lg border border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-900 shadow-sm hover:bg-white data-[state=on]:border-orange-600 data-[state=on]:bg-orange-600 data-[state=on]:text-white"
+              >
                 Atual
               </ToggleGroupItem>
-              <ToggleGroupItem value="history" className="h-9 px-3 text-[11px]">
+              <ToggleGroupItem
+                value="history"
+                className="h-11 rounded-lg border border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-900 shadow-sm hover:bg-white data-[state=on]:border-orange-600 data-[state=on]:bg-orange-600 data-[state=on]:text-white"
+              >
                 <History className="w-3.5 h-3.5 mr-1" />
                 Histórico
               </ToggleGroupItem>
@@ -1664,7 +1690,7 @@ export default function Nonstop() {
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
-                  className="h-9 px-3 text-[11px]"
+                  className="h-11 rounded-lg border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-900 shadow-sm hover:bg-white hover:text-slate-900 disabled:bg-white/60"
                   disabled={viewMode !== "history"}
                   title={viewMode !== "history" ? "Ativa o modo Histórico para usar o calendário" : "Calendário"}
                 >
@@ -1705,36 +1731,31 @@ export default function Nonstop() {
               </PopoverContent>
             </Popover>
 
-            {selectedEventTimeLabel ? (
-              <Badge variant="outline" className="h-9 px-2 text-[11px] border-orange-300 text-orange-700">
-                {selectedEventTimeLabel}
-              </Badge>
-            ) : null}
             {viewMode === "history" && !selectedHistoryEventId ? (
-              <Badge variant="outline" className="h-9 px-2 text-[11px] border-slate-300 text-slate-600">
+              <Badge variant="outline" className="h-11 rounded-lg border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-600 shadow-sm">
                 {eventsForSelectedDate.length === 0 ? "Sem eventos neste dia" : "Seleciona um horario"}
               </Badge>
             ) : null}
 
             {editableEvent ? (
-              <div className="flex flex-wrap items-center gap-1 rounded-md border bg-slate-50 p-1">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Input
                   type="date"
                   value={eventDateInput}
                   onChange={(event) => setEventDateInput(event.target.value)}
-                  className="h-8 w-[132px] text-[11px]"
+                  className="h-11 w-[152px] rounded-lg border-slate-200 bg-white/90 px-3 text-[14px] font-medium text-slate-900 shadow-sm"
                   title="Dia do Non Stop"
                 />
                 <Input
                   type="time"
                   value={eventTimeInput}
                   onChange={(event) => setEventTimeInput(event.target.value)}
-                  className="h-8 w-[92px] text-[11px]"
+                  className="h-11 w-[104px] rounded-lg border-slate-200 bg-white/90 px-3 text-[14px] font-medium text-slate-900 shadow-sm"
                   title="Hora do Non Stop"
                 />
                 <Button
                   size="sm"
-                  className="h-8 gap-1 px-2 text-[11px] bg-orange-600 text-white hover:bg-orange-500"
+                  className="h-11 gap-1.5 rounded-lg bg-orange-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-orange-500"
                   disabled={
                     updateEventMetadataMutation.isPending ||
                     !eventDateInput ||
@@ -2120,7 +2141,7 @@ export default function Nonstop() {
                 <TableHeader className="font-np-head bg-orange-600 text-white">
                   <TableRow className={cn("hover:bg-orange-600 h-6", isPresentationMode && "h-5 max-[900px]:h-[18px]")}>
                     <TableHead className={cn("h-6 text-white font-bold uppercase text-[10px] leading-none py-0.5 px-2 min-w-[200px]", isPresentationMode && "h-5 text-[9px] py-0 px-1.5 max-[900px]:text-[8px]")}>Duplas</TableHead>
-                    {Array.from({ length: numRounds }).map((_, i) => (
+                    {Array.from({ length: displayNumRounds }).map((_, i) => (
                       <TableHead key={i} className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500 whitespace-nowrap min-w-[64px]", isPresentationMode && "h-5 text-[9px] py-0 min-w-[56px] max-[900px]:text-[8px]")}>Ronda {i + 1}</TableHead>
                     ))}
                     <TableHead className={cn("h-6 text-white font-bold text-center text-[10px] leading-none py-0.5 border-l border-orange-500", isPresentationMode && "h-5 text-[9px] py-0 max-[900px]:text-[8px]")}>JG</TableHead>
@@ -2156,7 +2177,7 @@ export default function Nonstop() {
           </Card>
         </div>
       <div className={cn("grid grid-cols-1 lg:grid-cols-2 gap-2", isPresentationMode && "xl:grid-cols-3 gap-1")}>
-        {Array.from({ length: numRounds }).map((_, rIdx) => {
+        {Array.from({ length: displayNumRounds }).map((_, rIdx) => {
           const roundNum = rIdx + 1;
           return (
             <Card key={roundNum} className="overflow-hidden border-2 border-orange-600">
@@ -2176,7 +2197,7 @@ export default function Nonstop() {
                     </TableRow>
                   </TableHeader>
                   <TableBody className="font-np-body">
-                    {Array.from({ length: numCourts }).map((_, cIdx) => {
+                    {Array.from({ length: displayNumCourts }).map((_, cIdx) => {
                       const courtNum = cIdx + 1;
                       const matchResult = results?.find(res => res.round === roundNum && res.court === courtNum);
                       const scoreA = typeof matchResult?.scoreA === "number" ? matchResult.scoreA : null;

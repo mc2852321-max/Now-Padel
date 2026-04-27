@@ -57,7 +57,7 @@ export default function Ranking() {
       const suffix = params.toString() ? `?${params.toString()}` : "";
       const res = await fetch(`/api/ranking${suffix}`, { credentials: "include" });
       if (!res.ok) {
-        throw new Error("Nao foi possivel carregar o ranking.");
+        throw new Error("Não foi possível carregar o ranking.");
       }
       return res.json();
     },
@@ -115,14 +115,14 @@ export default function Ranking() {
       setBatchLabel("");
       setPlayerSearch("");
       toast({
-        title: "Importacao concluida",
+        title: "Importação concluída",
         description: `${result.inserted} registos de pontos foram importados.`,
       });
     },
     onError: (error: any) => {
       toast({
         title: "Erro",
-        description: error?.message || "Nao foi possivel importar os pontos iniciais.",
+        description: error?.message || "Não foi possível importar os pontos iniciais.",
         variant: "destructive",
       });
     },
@@ -137,7 +137,7 @@ export default function Ranking() {
     if (rows.length === 0) {
       toast({
         title: "Sem dados para importar",
-        description: "Preenche pelo menos um jogador com pontuacao diferente de zero.",
+        description: "Preenche pelo menos um jogador com pontuação diferente de zero.",
       });
       return;
     }
@@ -155,11 +155,11 @@ export default function Ranking() {
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Ranking</h2>
           <p className="text-sm text-muted-foreground">
-            Temporada {ranking?.season ?? "-"}: participacao +{ranking?.rules.participation ?? 2}, vitoria por ronda +{ranking?.rules.roundWin ?? 3}, derrota +{ranking?.rules.loss ?? 0}.
+            Temporada {ranking?.season ?? "-"}: participação +{ranking?.rules.participation ?? 2}, vitória por ronda +{ranking?.rules.roundWin ?? 3}, derrota +{ranking?.rules.loss ?? 0}.
           </p>
           {playersErrorMessage && (
             <p className="text-sm text-red-600">
-              Nao foi possivel carregar todos os jogadores. Tenta novamente dentro de instantes.
+              Não foi possível carregar todos os jogadores. Tenta novamente dentro de instantes.
             </p>
           )}
         </div>
@@ -203,7 +203,7 @@ export default function Ranking() {
               <DialogHeader>
                 <DialogTitle>Importar Pontos Iniciais</DialogTitle>
                 <DialogDescription>
-                  Define a pontuacao base atual de cada jogador. A partir daqui, o sistema soma automaticamente novos pontos.
+                  Define a pontuação base atual de cada jogador. A partir daqui, o sistema soma automaticamente novos pontos.
                 </DialogDescription>
               </DialogHeader>
 
@@ -224,7 +224,7 @@ export default function Ranking() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Jogador</TableHead>
-                        <TableHead>Nivel</TableHead>
+                        <TableHead>Nível</TableHead>
                         <TableHead className="w-32 text-right">Pontos</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -309,20 +309,20 @@ export default function Ranking() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Trophy className="w-5 h-5 text-orange-600" />
-            Classificacao
+            Classificação
           </CardTitle>
-          <CardDescription>Ranking atualizado automaticamente quando o Non Stop e finalizado.</CardDescription>
+          <CardDescription>Ranking atualizado automaticamente quando o Non Stop é finalizado.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-20">Posicao</TableHead>
+                <TableHead className="w-20">Posição</TableHead>
                 <TableHead>Jogador</TableHead>
-                <TableHead>Nivel</TableHead>
+                <TableHead>Nível</TableHead>
                 <TableHead className="text-right">Pontos</TableHead>
-                <TableHead className="text-right">Participacoes</TableHead>
-                <TableHead className="text-right">Vitorias</TableHead>
+                <TableHead className="text-right">Participações</TableHead>
+                <TableHead className="text-right">Vitórias</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -336,7 +336,7 @@ export default function Ranking() {
               {!isRankingLoading && (ranking?.items.length ?? 0) === 0 && (
                 <TableRow>
                   <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                    Sem pontuacao registada. Importa os pontos iniciais para comecar.
+                    Sem pontuação registada. Importa os pontos iniciais para começar.
                   </TableCell>
                 </TableRow>
               )}

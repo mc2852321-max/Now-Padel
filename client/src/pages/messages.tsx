@@ -13,6 +13,13 @@ type MessageTemplate = {
   body: string;
   custom?: boolean;
 };
+type MessageVariableKey = "nome" | "nivel" | "data" | "hora";
+type MessageVariable = {
+  key: MessageVariableKey;
+  token: string;
+  label: string;
+  placeholder: string;
+};
 
 const STORAGE_KEY = "now-padel-message-templates";
 
@@ -39,16 +46,19 @@ const DEFAULT_TEMPLATES: MessageTemplate[] = [
   },
 ];
 
-const MESSAGE_VARIABLES = [
-  { token: "{nome}", sample: "João" },
-  { token: "{nivel}", sample: "M4" },
-  { token: "{data}", sample: "27/04" },
-  { token: "{hora}", sample: "19:30" },
+const MESSAGE_VARIABLES: MessageVariable[] = [
+  { key: "nome", token: "{nome}", label: "Nome", placeholder: "Nome do jogador" },
+  { key: "nivel", token: "{nivel}", label: "Nível", placeholder: "Ex: M4" },
+  { key: "data", token: "{data}", label: "Data", placeholder: "Ex: 27/04" },
+  { key: "hora", token: "{hora}", label: "Hora", placeholder: "Ex: 19:30" },
 ];
 
-function applyPreviewVariables(value: string) {
+function applyPreviewVariables(value: string, variableValues: Record<MessageVariableKey, string>) {
   return MESSAGE_VARIABLES.reduce(
-    (text, variable) => text.split(variable.token).join(variable.sample),
+    (text, variable) => {
+      const replacement = variableValues[variable.key].trim();
+      return text.split(variable.token).join(replacement || variable.token);
+    },
     value,
   );
 }
@@ -57,6 +67,12 @@ export default function Messages() {
   const [message, setMessage] = useState("");
   const [savedTemplates, setSavedTemplates] = useState<MessageTemplate[]>([]);
   const [templateName, setTemplateName] = useState("");
+  const [variableValues, setVariableValues] = useState<Record<MessageVariableKey, string>>({
+    nome: "",
+    nivel: "",
+    data: "",
+    hora: "",
+  });
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -87,7 +103,10 @@ export default function Messages() {
     [savedTemplates],
   );
 
-  const previewMessage = useMemo(() => applyPreviewVariables(message), [message]);
+  const previewMessage = useMemo(
+    () => applyPreviewVariables(message, variableValues),
+    [message, variableValues],
+  );
 
   const persistTemplates = (templates: MessageTemplate[]) => {
     setSavedTemplates(templates);
@@ -95,7 +114,7 @@ export default function Messages() {
   };
 
   const handleSend = () => {
-    openWhatsAppGeneral(message);
+    openWhatsAppGeneral(previewMessage);
   };
 
   const handleSaveTemplate = () => {
@@ -176,6 +195,28 @@ export default function Messages() {
                     </Button>
                   ))}
                 </div>
+              </div>
+
+              <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2">
+                {MESSAGE_VARIABLES.map((variable) => (
+                  <div key={`value-${variable.key}`} className="space-y-1.5">
+                    <label className="text-xs font-medium leading-none" htmlFor={`message-variable-${variable.key}`}>
+                      {variable.label}
+                    </label>
+                    <Input
+                      id={`message-variable-${variable.key}`}
+                      value={variableValues[variable.key]}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setVariableValues((current) => ({
+                          ...current,
+                          [variable.key]: value,
+                        }));
+                      }}
+                      placeholder={variable.placeholder}
+                    />
+                  </div>
+                ))}
               </div>
 
               <div className="rounded-md border bg-slate-50 p-4 text-sm">

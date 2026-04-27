@@ -683,6 +683,12 @@ export async function registerRoutes(
     try {
       const onlyWithPoints = String(req.query.onlyWithPoints ?? "1") !== "0";
       const requestedSeason = parseSeasonYear(req.query.season);
+      const parsedPage = Number(req.query.page ?? 1);
+      const parsedPageSize = Number(req.query.pageSize ?? 25);
+      const page = Number.isFinite(parsedPage) ? Math.max(1, Math.trunc(parsedPage)) : 1;
+      const pageSize = Number.isFinite(parsedPageSize)
+        ? Math.min(100, Math.max(10, Math.trunc(parsedPageSize)))
+        : 25;
       const availableSeasons = await storage.getRankingSeasons();
       const currentSeason = getLisbonYear();
       const season = requestedSeason ?? availableSeasons[0] ?? currentSeason;
@@ -690,10 +696,25 @@ export async function registerRoutes(
       const filtered = onlyWithPoints
         ? leaderboard.filter((row) => row.totalPoints !== 0 || row.participationCount > 0 || row.roundWins > 0)
         : leaderboard;
+      const total = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const currentPage = Math.min(page, totalPages);
+      const start = (currentPage - 1) * pageSize;
+      const pageItems = filtered.slice(start, start + pageSize);
+      const totalPoints = filtered.reduce((sum, row) => sum + row.totalPoints, 0);
+      const importedPoints = filtered.reduce((sum, row) => sum + row.importedPoints, 0);
 
       res.json({
         season,
         availableSeasons,
+        page: currentPage,
+        pageSize,
+        total,
+        totalPages,
+        summary: {
+          totalPoints,
+          importedPoints,
+        },
         rules: {
           participation: 2,
           loss: 0,
@@ -721,8 +742,8 @@ export async function registerRoutes(
             },
           ],
         },
-        items: filtered.map((row, index) => ({
-          position: index + 1,
+        items: pageItems.map((row, index) => ({
+          position: start + index + 1,
           ...row,
         })),
       });

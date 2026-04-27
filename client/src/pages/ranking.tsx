@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Trophy, Upload } from "lucide-react";
+import { Info, Trophy, Upload } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { fetchAllPlayers, type PlayersPageResponse } from "@/lib/players";
@@ -36,6 +37,14 @@ type RankingRuleFormat = {
 type RankingResponse = {
   season: number;
   availableSeasons: number[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  summary: {
+    totalPoints: number;
+    importedPoints: number;
+  };
   rules: {
     participation: number;
     loss: number;
@@ -53,6 +62,24 @@ const formatPoints = (value: number) => (
     })
 );
 
+const formatRuleDetails = (rule: RankingRuleFormat) => {
+  const courtsLabel = rule.courts === 1 ? "1 campo" : `${rule.courts} campos`;
+  if (rule.rounds == null) {
+    return `Non Stop de ${courtsLabel}: +${formatPoints(rule.roundWin)} pontos por vitória.`;
+  }
+
+  const turnsLabel = rule.rounds === 3
+    ? "1 volta"
+    : rule.rounds === 6
+      ? "2 voltas"
+      : null;
+  const roundsLabel = turnsLabel
+    ? `${rule.rounds} rondas (${turnsLabel})`
+    : `${rule.rounds} rondas`;
+
+  return `Non Stop de ${courtsLabel} com ${roundsLabel}: +${formatPoints(rule.roundWin)} pontos por vitória.`;
+};
+
 export default function Ranking() {
   const { toast } = useToast();
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
@@ -61,16 +88,20 @@ export default function Ranking() {
   const [importValues, setImportValues] = useState<Record<number, string>>({});
   const [selectedSeason, setSelectedSeason] = useState<number | undefined>(undefined);
   const [showZeroPlayers, setShowZeroPlayers] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const lastPlayersErrorToastRef = useRef<{ message: string; at: number } | null>(null);
 
   const { data: ranking, isLoading: isRankingLoading } = useQuery<RankingResponse>({
-    queryKey: ["/api/ranking", { season: selectedSeason ?? "current", showZeroPlayers }],
+    queryKey: ["/api/ranking", { season: selectedSeason ?? "current", showZeroPlayers, page, pageSize }],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (typeof selectedSeason === "number") {
         params.set("season", String(selectedSeason));
       }
       params.set("onlyWithPoints", showZeroPlayers ? "0" : "1");
+      params.set("page", String(page));
+      params.set("pageSize", String(pageSize));
       const suffix = params.toString() ? `?${params.toString()}` : "";
       const res = await fetch(`/api/ranking${suffix}`, { credentials: "include" });
       if (!res.ok) {
@@ -108,6 +139,16 @@ export default function Ranking() {
     });
   }, [playersErrorMessage, toast]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [selectedSeason, showZeroPlayers]);
+
+  useEffect(() => {
+    if (ranking && ranking.page !== page) {
+      setPage(ranking.page);
+    }
+  }, [ranking, page]);
+
   const players = playersPage?.items ?? [];
   const filteredPlayers = useMemo(() => {
     const search = playerSearch.trim().toLowerCase();
@@ -116,8 +157,8 @@ export default function Ranking() {
   }, [playerSearch, players]);
 
   const totalImportedPoints = useMemo(
-    () => ranking?.items.reduce((sum, row) => sum + row.importedPoints, 0) ?? 0,
-    [ranking?.items],
+    () => ranking?.summary.importedPoints ?? 0,
+    [ranking?.summary.importedPoints],
   );
 
   const importMutation = useMutation({
@@ -171,23 +212,55 @@ export default function Ranking() {
 
   const rankingItems = ranking?.items ?? [];
   const scoringFormats = ranking?.rules.formats ?? [];
+  const rankingTotal = ranking?.total ?? rankingItems.length;
+  const rankingPage = ranking?.page ?? page;
+  const rankingTotalPages = ranking?.totalPages ?? 1;
+  const rankingPageSize = ranking?.pageSize ?? pageSize;
+  const showingFrom = rankingTotal === 0 ? 0 : ((rankingPage - 1) * rankingPageSize) + 1;
+  const showingTo = rankingTotal === 0 ? 0 : Math.min(rankingPage * rankingPageSize, rankingTotal);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Ranking</h2>
-          <p className="text-sm text-muted-foreground">
-            Temporada {ranking?.season ?? "-"}: participação +{formatPoints(ranking?.rules.participation ?? 2)} e derrota +{formatPoints(ranking?.rules.loss ?? 0)}.
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Pontos por vitória variam conforme o formato do Non Stop:
-          </p>
-          <div className="text-sm text-muted-foreground">
-            {scoringFormats.map((rule) => (
-              <p key={rule.id}>{rule.description}</p>
-            ))}
+          <div className="flex items-center gap-2">
+            <h2 className="text-3xl font-bold tracking-tight">Ranking</h2>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  aria-label="Ver regras de pontuação do ranking"
+                >
+                  <Info className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" align="start" className="max-w-[380px] space-y-2 whitespace-normal leading-relaxed">
+                <p className="font-medium">
+                  Regras da temporada {ranking?.season ?? "-"}
+                </p>
+                <ul className="list-disc space-y-1 pl-4">
+                  <li>Participação: +{formatPoints(ranking?.rules.participation ?? 2)} pontos.</li>
+                  <li>Derrota por ronda: +{formatPoints(ranking?.rules.loss ?? 0)} pontos.</li>
+                </ul>
+                <p className="font-medium">Pontos por vitória (por ronda):</p>
+                {scoringFormats.length > 0 ? (
+                  <ul className="list-disc space-y-1 pl-4">
+                    {scoringFormats.map((rule) => (
+                      <li key={`rule-tip-${rule.id}`}>{formatRuleDetails(rule)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>Sem regras de pontuação configuradas.</p>
+                )}
+              </TooltipContent>
+            </Tooltip>
           </div>
+          <p className="text-sm text-muted-foreground">
+            Temporada {ranking?.season ?? "-"}: consulte as regras no ícone de informação.
+          </p>
           {playersErrorMessage && (
             <p className="text-sm text-red-600">
               Não foi possível carregar todos os jogadores. Tenta novamente dentro de instantes.
@@ -316,7 +389,7 @@ export default function Ranking() {
             <CardTitle className="text-base">Jogadores no ranking</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{rankingItems.length}</p>
+            <p className="text-3xl font-bold">{rankingTotal}</p>
           </CardContent>
         </Card>
         <Card>
@@ -324,7 +397,7 @@ export default function Ranking() {
             <CardTitle className="text-base">Pontos totais</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{formatPoints(rankingItems.reduce((sum, row) => sum + row.totalPoints, 0))}</p>
+            <p className="text-3xl font-bold">{formatPoints(ranking?.summary.totalPoints ?? 0)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -346,17 +419,18 @@ export default function Ranking() {
           <CardDescription>Ranking atualizado automaticamente quando o Non Stop é finalizado.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-20">Posição</TableHead>
-                <TableHead>Jogador</TableHead>
-                <TableHead>Nível</TableHead>
-                <TableHead className="text-right">Pontos</TableHead>
-                <TableHead className="text-right">Participações</TableHead>
-                <TableHead className="text-right">Vitórias</TableHead>
-              </TableRow>
-            </TableHeader>
+          <div className="overflow-x-auto">
+            <Table className="min-w-[640px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-20">Posição</TableHead>
+                  <TableHead>Jogador</TableHead>
+                  <TableHead className="hidden sm:table-cell">Nível</TableHead>
+                  <TableHead className="text-right">Pontos</TableHead>
+                  <TableHead className="hidden md:table-cell text-right">Participações</TableHead>
+                  <TableHead className="hidden md:table-cell text-right">Vitórias</TableHead>
+                </TableRow>
+              </TableHeader>
             <TableBody>
               {isRankingLoading && (
                 <TableRow>
@@ -375,15 +449,67 @@ export default function Ranking() {
               {rankingItems.map((row) => (
                 <TableRow key={`ranking-row-${row.playerId}`}>
                   <TableCell className="font-semibold">{row.position}</TableCell>
-                  <TableCell className="font-medium">{row.name}</TableCell>
-                  <TableCell>{row.level}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex flex-col">
+                      <span>{row.name}</span>
+                      <span className="text-xs text-muted-foreground sm:hidden">
+                        Nível {row.level} · Part. {row.participationCount} · Vit. {row.roundWins}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="hidden sm:table-cell">{row.level}</TableCell>
                   <TableCell className="text-right font-semibold">{formatPoints(row.totalPoints)}</TableCell>
-                  <TableCell className="text-right">{row.participationCount}</TableCell>
-                  <TableCell className="text-right">{row.roundWins}</TableCell>
+                  <TableCell className="hidden md:table-cell text-right">{row.participationCount}</TableCell>
+                  <TableCell className="hidden md:table-cell text-right">{row.roundWins}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
+          <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              {rankingTotal > 0
+                ? `A mostrar ${showingFrom}-${showingTo} de ${rankingTotal} jogadores`
+                : "Sem jogadores para mostrar."}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={String(rankingPageSize)}
+                onValueChange={(value) => {
+                  setPageSize(Number(value));
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-8 w-[96px]">
+                  <SelectValue placeholder="25" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="25">25 / pág.</SelectItem>
+                  <SelectItem value="50">50 / pág.</SelectItem>
+                  <SelectItem value="100">100 / pág.</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(Math.max(1, rankingPage - 1))}
+                disabled={isRankingLoading || rankingPage <= 1}
+              >
+                Anterior
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Página {rankingPage} / {Math.max(1, rankingTotalPages)}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(Math.min(rankingTotalPages, rankingPage + 1))}
+                disabled={isRankingLoading || rankingPage >= rankingTotalPages}
+              >
+                Seguinte
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -973,6 +973,8 @@ export default function Nonstop() {
       queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
       queryClient.invalidateQueries({ queryKey: ["/api/results"] });
       queryClient.invalidateQueries({ queryKey: ["/api/nonstop/timer"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ranking"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ranking/entries"] });
       toast({ title: "Sucesso", description: "Evento finalizado e novo Non Stop iniciado" });
     }
   });

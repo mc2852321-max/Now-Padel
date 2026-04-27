@@ -113,7 +113,7 @@ export default function Ranking() {
       }
       return res.json();
     },
-    refetchInterval: 10000,
+    refetchInterval: 3000,
     refetchOnWindowFocus: true,
   });
 

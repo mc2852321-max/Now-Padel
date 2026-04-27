@@ -201,29 +201,31 @@ function computeStandings(
 }
 
 const RANKING_PARTICIPATION_POINTS = 2;
+const RANKING_MAX_WIN_POINTS_PER_EVENT = 15;
 const RANKING_DEFAULT_ROUND_WIN_POINTS = 3;
 
 export class DatabaseStorage implements IStorage {
   private normalizeRankingPoints(value: number): number {
-    return Math.round(value * 2) / 2;
+    return Math.round(value * 1000) / 1000;
   }
 
   private formatRankingPoints(value: number): string {
     const normalized = this.normalizeRankingPoints(value);
     if (Number.isInteger(normalized)) return String(normalized);
-    return normalized.toFixed(1).replace(".", ",");
+    return normalized.toFixed(3).replace(/0+$/, "").replace(/\.$/, "").replace(".", ",");
   }
 
   private resolveRoundWinPoints(nonstopCourts?: number | null, nonstopRounds?: number | null): number {
     const courts = Number.isFinite(nonstopCourts) ? Math.max(1, Number(nonstopCourts)) : 0;
     const rounds = Number.isFinite(nonstopRounds) ? Math.max(1, Number(nonstopRounds)) : 0;
 
-    if (courts === 2) {
-      if (rounds === 6) return 2.5;
-      if (rounds === 3) return 5;
-      return rounds > 3 ? 2.5 : 5;
+    // Regra geral: se vencer todas as rondas do evento, soma sempre 15 pontos por vitórias.
+    if (rounds > 0) {
+      return RANKING_MAX_WIN_POINTS_PER_EVENT / rounds;
     }
 
+    // Fallback para eventos antigos/incompletos sem rondas.
+    if (courts === 2) return 5;
     if (courts === 3) {
       return 3;
     }

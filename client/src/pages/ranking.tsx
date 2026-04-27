@@ -58,11 +58,15 @@ const formatPoints = (value: number) => (
     ? String(value)
     : value.toLocaleString("pt-PT", {
       minimumFractionDigits: 1,
-      maximumFractionDigits: 1,
+      maximumFractionDigits: 3,
     })
 );
 
 const formatRuleDetails = (rule: RankingRuleFormat) => {
+  if (rule.description.trim()) {
+    return rule.description;
+  }
+
   const courtsLabel = rule.courts === 1 ? "1 campo" : `${rule.courts} campos`;
   if (rule.rounds == null) {
     return `Non Stop de ${courtsLabel}: +${formatPoints(rule.roundWin)} pontos por vitória.`;

@@ -25,16 +25,33 @@ type RankingItem = {
   lastEntryAt: string | null;
 };
 
+type RankingRuleFormat = {
+  id: string;
+  courts: number;
+  rounds: number | null;
+  roundWin: number;
+  description: string;
+};
+
 type RankingResponse = {
   season: number;
   availableSeasons: number[];
   rules: {
     participation: number;
-    roundWin: number;
     loss: number;
+    formats: RankingRuleFormat[];
   };
   items: RankingItem[];
 };
+
+const formatPoints = (value: number) => (
+  Number.isInteger(value)
+    ? String(value)
+    : value.toLocaleString("pt-PT", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    })
+);
 
 export default function Ranking() {
   const { toast } = useToast();
@@ -130,8 +147,11 @@ export default function Ranking() {
 
   const handleImport = () => {
     const rows = Object.entries(importValues)
-      .map(([playerId, value]) => ({ playerId: Number(playerId), points: Number(value) }))
-      .filter((row) => Number.isInteger(row.playerId) && Number.isInteger(row.points))
+      .map(([playerId, value]) => ({
+        playerId: Number(playerId),
+        points: Number(String(value).replace(",", ".")),
+      }))
+      .filter((row) => Number.isInteger(row.playerId) && Number.isFinite(row.points))
       .filter((row) => row.points !== 0);
 
     if (rows.length === 0) {
@@ -149,14 +169,25 @@ export default function Ranking() {
     });
   };
 
+  const rankingItems = ranking?.items ?? [];
+  const scoringFormats = ranking?.rules.formats ?? [];
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Ranking</h2>
           <p className="text-sm text-muted-foreground">
-            Temporada {ranking?.season ?? "-"}: participação +{ranking?.rules.participation ?? 2}, vitória por ronda +{ranking?.rules.roundWin ?? 3}, derrota +{ranking?.rules.loss ?? 0}.
+            Temporada {ranking?.season ?? "-"}: participação +{formatPoints(ranking?.rules.participation ?? 2)} e derrota +{formatPoints(ranking?.rules.loss ?? 0)}.
           </p>
+          <p className="text-sm text-muted-foreground">
+            Pontos por vitória variam conforme o formato do Non Stop:
+          </p>
+          <div className="text-sm text-muted-foreground">
+            {scoringFormats.map((rule) => (
+              <p key={rule.id}>{rule.description}</p>
+            ))}
+          </div>
           {playersErrorMessage && (
             <p className="text-sm text-red-600">
               Não foi possível carregar todos os jogadores. Tenta novamente dentro de instantes.
@@ -236,7 +267,8 @@ export default function Ranking() {
                           <TableCell>
                             <Input
                               type="number"
-                              inputMode="numeric"
+                              inputMode="decimal"
+                              step="0.5"
                               className="text-right"
                               value={importValues[player.id] ?? ""}
                               onChange={(event) => {
@@ -284,7 +316,7 @@ export default function Ranking() {
             <CardTitle className="text-base">Jogadores no ranking</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{ranking?.items.length ?? 0}</p>
+            <p className="text-3xl font-bold">{rankingItems.length}</p>
           </CardContent>
         </Card>
         <Card>
@@ -292,7 +324,7 @@ export default function Ranking() {
             <CardTitle className="text-base">Pontos totais</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{ranking?.items.reduce((sum, row) => sum + row.totalPoints, 0) ?? 0}</p>
+            <p className="text-3xl font-bold">{formatPoints(rankingItems.reduce((sum, row) => sum + row.totalPoints, 0))}</p>
           </CardContent>
         </Card>
         <Card>
@@ -300,7 +332,7 @@ export default function Ranking() {
             <CardTitle className="text-base">Base importada</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{totalImportedPoints}</p>
+            <p className="text-3xl font-bold">{formatPoints(totalImportedPoints)}</p>
           </CardContent>
         </Card>
       </div>
@@ -333,19 +365,19 @@ export default function Ranking() {
                   </TableCell>
                 </TableRow>
               )}
-              {!isRankingLoading && (ranking?.items.length ?? 0) === 0 && (
+              {!isRankingLoading && rankingItems.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                     Sem pontuação registada. Importa os pontos iniciais para começar.
                   </TableCell>
                 </TableRow>
               )}
-              {(ranking?.items ?? []).map((row) => (
+              {rankingItems.map((row) => (
                 <TableRow key={`ranking-row-${row.playerId}`}>
                   <TableCell className="font-semibold">{row.position}</TableCell>
                   <TableCell className="font-medium">{row.name}</TableCell>
                   <TableCell>{row.level}</TableCell>
-                  <TableCell className="text-right font-semibold">{row.totalPoints}</TableCell>
+                  <TableCell className="text-right font-semibold">{formatPoints(row.totalPoints)}</TableCell>
                   <TableCell className="text-right">{row.participationCount}</TableCell>
                   <TableCell className="text-right">{row.roundWins}</TableCell>
                 </TableRow>

@@ -696,8 +696,30 @@ export async function registerRoutes(
         availableSeasons,
         rules: {
           participation: 2,
-          roundWin: 3,
           loss: 0,
+          formats: [
+            {
+              id: "2-campos-3-rondas",
+              courts: 2,
+              rounds: 3,
+              roundWin: 5,
+              description: "Non Stop de 2 campos com 3 rondas (1 volta): +5 por vitória.",
+            },
+            {
+              id: "2-campos-6-rondas",
+              courts: 2,
+              rounds: 6,
+              roundWin: 2.5,
+              description: "Non Stop de 2 campos com 6 rondas (2 voltas): +2,5 por vitória.",
+            },
+            {
+              id: "3-campos",
+              courts: 3,
+              rounds: null,
+              roundWin: 3,
+              description: "Non Stop de 3 campos: +3 por vitória.",
+            },
+          ],
         },
         items: filtered.map((row, index) => ({
           position: index + 1,
@@ -1193,12 +1215,18 @@ export async function registerRoutes(
         season_year INTEGER NOT NULL,
         event_id INTEGER,
         round INTEGER,
-        points INTEGER NOT NULL,
+        points DOUBLE PRECISION NOT NULL,
         reason TEXT NOT NULL,
         reason_key TEXT NOT NULL,
         note TEXT,
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       )
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE ranking_entries
+      ALTER COLUMN points TYPE DOUBLE PRECISION
+      USING points::DOUBLE PRECISION
     `);
 
     await db.execute(sql`

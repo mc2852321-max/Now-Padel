@@ -200,12 +200,37 @@ function computeStandings(
   });
 }
 
-const RANKING_POINTS = {
-  participation: 2,
-  roundWin: 3,
-} as const;
+const RANKING_PARTICIPATION_POINTS = 2;
+const RANKING_DEFAULT_ROUND_WIN_POINTS = 3;
 
 export class DatabaseStorage implements IStorage {
+  private normalizeRankingPoints(value: number): number {
+    return Math.round(value * 2) / 2;
+  }
+
+  private formatRankingPoints(value: number): string {
+    const normalized = this.normalizeRankingPoints(value);
+    if (Number.isInteger(normalized)) return String(normalized);
+    return normalized.toFixed(1).replace(".", ",");
+  }
+
+  private resolveRoundWinPoints(nonstopCourts?: number | null, nonstopRounds?: number | null): number {
+    const courts = Number.isFinite(nonstopCourts) ? Math.max(1, Number(nonstopCourts)) : 0;
+    const rounds = Number.isFinite(nonstopRounds) ? Math.max(1, Number(nonstopRounds)) : 0;
+
+    if (courts === 2) {
+      if (rounds === 6) return 2.5;
+      if (rounds === 3) return 5;
+      return rounds > 3 ? 2.5 : 5;
+    }
+
+    if (courts === 3) {
+      return 3;
+    }
+
+    return RANKING_DEFAULT_ROUND_WIN_POINTS;
+  }
+
   private getLisbonYear(dateLike: Date | string | null | undefined): number {
     const value = dateLike ? new Date(dateLike) : new Date();
     if (Number.isNaN(value.getTime())) return new Date().getUTCFullYear();
@@ -305,6 +330,7 @@ export class DatabaseStorage implements IStorage {
     seasonYear: number,
     eventTeams: Team[],
     eventResults: NonstopResult[],
+    opts: { nonstopCourts?: number | null; nonstopRounds?: number | null },
     executor: DbExecutor = db,
   ): Promise<void> {
     const teamPlayers = new Map<number, number[]>();
@@ -325,14 +351,17 @@ export class DatabaseStorage implements IStorage {
           seasonYear,
           eventId,
           round: null,
-          points: RANKING_POINTS.participation,
+          points: RANKING_PARTICIPATION_POINTS,
           reason: "participation",
           reasonKey: `nonstop:${eventId}:participation:player:${playerId}`,
-          note: "Participacao no Non Stop",
+          note: "Participação no Non Stop",
         },
         executor,
       );
     }
+
+    const roundWinPoints = this.resolveRoundWinPoints(opts.nonstopCourts, opts.nonstopRounds);
+    const roundWinPointsLabel = this.formatRankingPoints(roundWinPoints);
 
     for (const result of eventResults) {
       const hasPlayed = result.scoreA > 0 || result.scoreB > 0;
@@ -351,10 +380,10 @@ export class DatabaseStorage implements IStorage {
             seasonYear,
             eventId,
             round: result.round,
-            points: RANKING_POINTS.roundWin,
+            points: roundWinPoints,
             reason: "round_win",
             reasonKey: `nonstop:${eventId}:round:${result.round}:court:${result.court}:win:player:${playerId}`,
-            note: `Vitoria na ronda ${result.round}`,
+            note: `Vitória na ronda ${result.round} (+${roundWinPointsLabel})`,
           },
           executor,
         );
@@ -561,6 +590,10 @@ export class DatabaseStorage implements IStorage {
         seasonYear,
         eventTeams,
         eventResults,
+        {
+          nonstopCourts: appSettings.nonstopCourts,
+          nonstopRounds: appSettings.nonstopRounds,
+        },
         tx as unknown as DbExecutor,
       );
 
@@ -848,7 +881,11 @@ export class DatabaseStorage implements IStorage {
   ): Promise<number> {
     const cleanRows = rows
       .filter((row) => Number.isInteger(row.playerId) && row.playerId > 0)
-      .filter((row) => Number.isInteger(row.points))
+      .filter((row) => Number.isFinite(row.points))
+      .map((row) => ({
+        ...row,
+        points: this.normalizeRankingPoints(row.points),
+      }))
       .filter((row) => row.points !== 0);
 
     if (cleanRows.length === 0) return 0;

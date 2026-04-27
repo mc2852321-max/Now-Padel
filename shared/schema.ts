@@ -1,4 +1,4 @@
-import { pgTable, text, serial, varchar, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, varchar, integer, timestamp, doublePrecision } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -85,7 +85,7 @@ export const rankingEntries = pgTable("ranking_entries", {
   seasonYear: integer("season_year").notNull(),
   eventId: integer("event_id"),
   round: integer("round"),
-  points: integer("points").notNull(),
+  points: doublePrecision("points").notNull(),
   reason: text("reason").notNull(),
   reasonKey: text("reason_key").notNull(),
   note: text("note"),
@@ -169,7 +169,9 @@ export type MessageRequest = z.infer<typeof messageSchema>;
 
 export const rankingImportRowSchema = z.object({
   playerId: z.number().int().positive(),
-  points: z.number().int(),
+  points: z.number().finite().refine((value) => Number.isInteger(value * 2), {
+    message: "Os pontos devem estar em incrementos de 0,5",
+  }),
   note: z.string().optional(),
 });
 

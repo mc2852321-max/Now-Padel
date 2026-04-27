@@ -45,6 +45,15 @@ type NonstopEventDetails = {
   timer: SyncedTimer;
   snapshot: any | null;
 };
+type WakeLockSentinelLike = EventTarget & {
+  released?: boolean;
+  release: () => Promise<void>;
+};
+type NavigatorWithWakeLock = Navigator & {
+  wakeLock?: {
+    request: (type: "screen") => Promise<WakeLockSentinelLike>;
+  };
+};
 
 function getConfiguredDuration(
   soundType: string,
@@ -138,6 +147,7 @@ export default function Nonstop() {
   const [confirmStopPresentation, setConfirmStopPresentation] = useState(false);
   const phaseEndAtRef = useRef<number | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
   const soundBusyUntilRef = useRef(0);
   const soundTimeoutsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const lastQueuedSoundRef = useRef<{ key: string; at: number } | null>(null);
@@ -242,6 +252,68 @@ export default function Nonstop() {
     };
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, [isPresentationMode]);
+
+  useEffect(() => {
+    const releaseWakeLock = async () => {
+      const lock = wakeLockRef.current;
+      wakeLockRef.current = null;
+      if (!lock || lock.released) return;
+
+      try {
+        await lock.release();
+      } catch {
+        // Browser support and permission state can change while leaving presentation mode.
+      }
+    };
+
+    if (!isPresentationMode || typeof navigator === "undefined") {
+      void releaseWakeLock();
+      return;
+    }
+
+    let cancelled = false;
+
+    const requestWakeLock = async () => {
+      const wakeLock = (navigator as NavigatorWithWakeLock).wakeLock;
+      if (!wakeLock || wakeLockRef.current) return;
+
+      try {
+        const lock = await wakeLock.request("screen");
+        if (cancelled) {
+          void lock.release().catch(() => {});
+          return;
+        }
+
+        wakeLockRef.current = lock;
+        lock.addEventListener(
+          "release",
+          () => {
+            if (wakeLockRef.current === lock) {
+              wakeLockRef.current = null;
+            }
+          },
+          { once: true },
+        );
+      } catch {
+        wakeLockRef.current = null;
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void requestWakeLock();
+      }
+    };
+
+    void requestWakeLock();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      void releaseWakeLock();
+    };
   }, [isPresentationMode]);
 
   useEffect(() => {
@@ -1819,7 +1891,7 @@ export default function Nonstop() {
           </DrawerHeader>
           <div className="px-4 pb-4 space-y-2">
             {eventsForSelectedDate.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nao ha eventos neste dia.</p>
+              <p className="text-sm text-muted-foreground">Não há eventos neste dia.</p>
             ) : (
               eventsForSelectedDate.map((event) => (
                 <Button

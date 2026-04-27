@@ -124,7 +124,7 @@ function AuthorizedUsersSection() {
     password: z.string().min(4, "A password deve ter pelo menos 4 caracteres"),
     confirmPassword: z.string().min(1, "Confirme a password"),
   }).refine((data) => data.password === data.confirmPassword, {
-    message: "As passwords nao coincidem",
+    message: "As palavras-passe não coincidem",
     path: ["confirmPassword"],
   });
 

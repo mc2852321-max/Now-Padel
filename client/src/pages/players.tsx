@@ -21,6 +21,17 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -283,6 +294,87 @@ export default function Players() {
     setSelectedIds([player.id]);
   };
 
+  const renderProfileTags = (player: Player) => {
+    const selectedTags = parseArrayField(player.profileTags);
+    if (selectedTags.length === 0) {
+      return <span className="text-muted-foreground">-</span>;
+    }
+
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {selectedTags.map((tag) => (
+          <Badge key={`${player.id}-${tag}`} variant="secondary" className="text-[11px]">
+            {tag}
+          </Badge>
+        ))}
+      </div>
+    );
+  };
+
+  const renderPlayerActions = (player: Player, compact = true) => (
+    <div className={compact ? "flex justify-end gap-1" : "grid grid-cols-3 gap-2"}>
+      <Button
+        variant={compact ? "ghost" : "outline"}
+        size={compact ? "icon" : "sm"}
+        className={cn(
+          "text-orange-600 hover:text-orange-500",
+          !compact && "gap-2 px-2 text-xs",
+        )}
+        title="Enviar WhatsApp"
+        aria-label={`Enviar WhatsApp a ${player.name}`}
+        onClick={() => handleIndividualWhatsapp(player)}
+      >
+        <SiWhatsapp className="w-5 h-5" />
+        {!compact && <span>WhatsApp</span>}
+      </Button>
+      <Button
+        variant={compact ? "ghost" : "outline"}
+        size={compact ? "icon" : "sm"}
+        className={cn(!compact && "gap-2 px-2 text-xs")}
+        title="Editar jogador"
+        aria-label={`Editar ${player.name}`}
+        onClick={() => setEditingPlayer(player)}
+      >
+        <Edit2 className="w-4 h-4" />
+        {!compact && <span>Editar</span>}
+      </Button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant={compact ? "ghost" : "outline"}
+            size={compact ? "icon" : "sm"}
+            className={cn(
+              "text-destructive hover:text-destructive",
+              !compact && "gap-2 px-2 text-xs",
+            )}
+            title="Apagar jogador"
+            aria-label={`Apagar ${player.name}`}
+          >
+            <Trash2 className="w-4 h-4" />
+            {!compact && <span>Apagar</span>}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar jogador?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O jogador "{player.name}" será removido da lista. Esta ação não pode ser anulada.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteMutation.mutate(player.id)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Confirmar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -501,7 +593,7 @@ export default function Players() {
         </div>
       </div>
 
-      <Card>
+      <Card className="hidden md:block">
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -534,53 +626,11 @@ export default function Players() {
                   <TableCell>
                     <Badge variant="outline">{player.level}</Badge>
                   </TableCell>
-                  <TableCell className="max-w-[300px]">
-                    {(() => {
-                      const selectedTags = parseArrayField(player.profileTags);
-                      if (selectedTags.length === 0) {
-                        return <span className="text-muted-foreground">-</span>;
-                      }
-                      return (
-                        <div className="flex flex-wrap gap-1.5">
-                          {selectedTags.map((tag) => (
-                            <Badge key={`${player.id}-${tag}`} variant="secondary" className="text-[11px]">
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
-                      );
-                    })()}
-                  </TableCell>
+                  <TableCell className="max-w-[300px]">{renderProfileTags(player)}</TableCell>
                   <TableCell className="max-w-[200px] truncate text-muted-foreground">
                     {player.notes || "-"}
                   </TableCell>
-                  <TableCell className="text-right px-4">
-                    <div className="flex justify-end gap-1">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="text-orange-600 hover:text-orange-500" 
-                        onClick={() => handleIndividualWhatsapp(player)}
-                      >
-                        <SiWhatsapp className="w-5 h-5" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => setEditingPlayer(player)}
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => deleteMutation.mutate(player.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
+                  <TableCell className="text-right px-4">{renderPlayerActions(player)}</TableCell>
                 </TableRow>
               ))}
               {!players.length && (
@@ -594,6 +644,58 @@ export default function Players() {
           </Table>
         </CardContent>
       </Card>
+
+      <div className="space-y-3 md:hidden">
+        {players.map((player) => (
+          <Card
+            key={`mobile-${player.id}`}
+            className={cn(
+              "overflow-hidden",
+              selectedIds.includes(player.id) && "border-orange-400 bg-orange-50/50",
+            )}
+          >
+            <CardContent className="space-y-4 p-4">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  checked={selectedIds.includes(player.id)}
+                  onCheckedChange={() => toggleSelect(player.id)}
+                  aria-label={`Selecionar ${player.name}`}
+                  className="mt-1"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="break-words text-base font-semibold leading-tight">{player.name}</h3>
+                    <Badge variant="outline" className="shrink-0">{player.level}</Badge>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">{player.phone}</p>
+                </div>
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">Perfil</p>
+                  {renderProfileTags(player)}
+                </div>
+                {player.notes && (
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">Notas</p>
+                    <p className="break-words text-muted-foreground">{player.notes}</p>
+                  </div>
+                )}
+              </div>
+
+              {renderPlayerActions(player, false)}
+            </CardContent>
+          </Card>
+        ))}
+        {!players.length && (
+          <Card>
+            <CardContent className="p-6 text-center text-muted-foreground">
+              Nenhum jogador encontrado.
+            </CardContent>
+          </Card>
+        )}
+      </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">

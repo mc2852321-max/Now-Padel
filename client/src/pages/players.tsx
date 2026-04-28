@@ -616,7 +616,7 @@ export default function Players() {
                           >
                             {result.status === "mock_sent" ? "mock" : result.status}
                           </Badge>
-                          {(result.status === "manual" || result.status === "failed") && result.fallbackUrl && (
+                          {sendResult.results.length > 1 && (result.status === "manual" || result.status === "failed") && result.fallbackUrl && (
                             <Button
                               variant="outline"
                               size="sm"

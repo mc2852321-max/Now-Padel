@@ -1656,8 +1656,7 @@ export default function Nonstop() {
           )}
         </div>
         
-        <div className="flex flex-col items-start gap-3 md:items-end">
-          <div className="flex flex-wrap items-center justify-start gap-2 md:justify-end">
+        <div className="flex flex-wrap items-center gap-2">
           <div
             className={cn(
               "w-full sm:w-auto flex flex-wrap items-center gap-1.5 rounded-xl border border-white/70 bg-white/70 p-1.5 shadow-sm backdrop-blur-md",
@@ -1951,9 +1950,7 @@ export default function Nonstop() {
               </Link>
             </div>
           </Card>
-          </div>
 
-          <div className={cn("flex flex-wrap items-center justify-start gap-2 md:justify-end", isPresentationMode && "gap-1")}>
           <Button
             variant={isPresentationMode ? "default" : "outline"}
             size="sm"
@@ -2176,7 +2173,6 @@ export default function Nonstop() {
               </div>
             </DialogContent>
             </Dialog>
-          </div>
           </div>
         </div>
       </div>

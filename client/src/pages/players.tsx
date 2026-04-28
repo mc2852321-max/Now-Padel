@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Player, Settings, insertPlayerSchema } from "@shared/schema";
+import { type Player, type Settings, insertPlayerSchema, type MessageRequest, type WhatsappSendResponse } from "@shared/schema";
 import { api, buildUrl } from "@shared/routes";
 import {
   Table,
@@ -55,10 +55,9 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { SiWhatsapp } from "react-icons/si";
-import { Plus, Trash2, Edit2, Filter, Clock, Calendar as CalendarIcon, Search, ChevronDown } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { Plus, Trash2, Edit2, Filter, Clock, Calendar as CalendarIcon, Search, ChevronDown, Loader2, ExternalLink } from "lucide-react";
+import { useState, useEffect } from "react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { openWhatsApp } from "@/lib/whatsapp";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -106,9 +105,7 @@ export default function Players() {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   
   const [isBulkMessageOpen, setIsBulkMessageOpen] = useState(false);
-  const [sendingIndex, setSendingIndex] = useState(-1);
-  const [lastSelectedIds, setLastSelectedIds] = useState<number[]>([]);
-  const whatsappWindowRef = useRef<Window | null>(null);
+  const [sendResult, setSendResult] = useState<WhatsappSendResponse | null>(null);
   const { toast } = useToast();
   const { data: settings } = useQuery<Settings>({
     queryKey: ["/api/settings"],
@@ -160,6 +157,16 @@ export default function Players() {
   const players = data?.items ?? [];
   const totalPlayers = data?.total ?? 0;
   const totalPages = data?.totalPages ?? 1;
+  const selectedPlayersForPreview = selectedIds
+    .map((id) => players.find((player) => player.id === id))
+    .filter((player): player is Player => Boolean(player));
+  const previewLevel = (() => {
+    if (levelFilter !== "all") return levelFilter;
+    if (selectedPlayersForPreview.length === 1) return selectedPlayersForPreview[0].level;
+
+    const uniqueLevels = Array.from(new Set(selectedPlayersForPreview.map((player) => player.level)));
+    return uniqueLevels.length === 1 ? uniqueLevels[0] : "[Nível]";
+  })();
 
   useEffect(() => {
     setSelectedIds([]);
@@ -205,6 +212,59 @@ export default function Players() {
     }
   });
 
+  const getDayLabel = (date: Date) => {
+    if (isToday(date)) return "hoje";
+    if (isTomorrow(date)) return "amanhã";
+    return `no dia ${format(date, "dd/MM/yyyy")}`;
+  };
+
+  const buildInviteMessage = (player: Player) => {
+    if (!gameDate) return "";
+    const dayLabel = getDayLabel(gameDate);
+    const timeLabel = `${gameHour}:${gameMinute}`;
+    const displayLevel = levelFilter !== "all" ? levelFilter : player.level;
+    return `Olá 👋\nFalta 1 jogador para um jogo do nível ${displayLevel} ${dayLabel} às ${timeLabel}.\nConsegues jogar? 😉`;
+  };
+
+  const sendWhatsappMutation = useMutation({
+    mutationFn: async (payload: MessageRequest) => {
+      const res = await apiRequest("POST", api.whatsapp.send.path, payload);
+      return res.json() as Promise<WhatsappSendResponse>;
+    },
+    onSuccess: (result) => {
+      setSendResult(result);
+
+      if (result.mode === "manual") {
+        toast({
+          title: "Envio manual preparado",
+          description: `${result.manual} link(s) de WhatsApp pronto(s).`,
+        });
+        return;
+      }
+
+      if (result.failed === 0 && result.skipped === 0) {
+        toast({
+          title: result.mode === "mock" ? "Envio simulado" : "Sucesso",
+          description: `${result.sent} mensagem(ns) ${result.mode === "mock" ? "simulada(s)" : "enviada(s)"}.`,
+        });
+        return;
+      }
+
+      toast({
+        title: "Envio concluido com avisos",
+        description: `${result.sent} enviada(s), ${result.failed} falhada(s), ${result.skipped} ignorada(s).`,
+        variant: "destructive",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro ao enviar WhatsApp",
+        description: error instanceof Error ? error.message : "Nao foi possivel enviar as mensagens.",
+        variant: "destructive",
+      });
+    },
+  });
+
   if (isLoading) {
     return <div className="flex items-center justify-center h-64">A carregar jogadores...</div>;
   }
@@ -223,12 +283,6 @@ export default function Players() {
     }
   };
 
-  const getDayLabel = (date: Date) => {
-    if (isToday(date)) return "hoje";
-    if (isTomorrow(date)) return "amanhã";
-    return `no dia ${format(date, "dd/MM/yyyy")}`;
-  };
-
   const handleBulkWhatsapp = () => {
     if (selectedIds.length === 0 || !gameDate) return;
     const currentSelected = [...selectedIds];
@@ -238,58 +292,18 @@ export default function Players() {
 
     const sortedSelectedPlayers = currentSelected.map(id => selectedPlayers.find(p => p.id === id)!).filter(Boolean);
 
-    setLastSelectedIds(currentSelected);
-    setSendingIndex(0);
-    
-    const player = sortedSelectedPlayers[0];
-    const dayLabel = getDayLabel(gameDate);
-    const timeLabel = `${gameHour}:${gameMinute}`;
-    const displayLevel = levelFilter !== "all" ? levelFilter : player.level;
-    const message = `Olá 👋\nFalta 1 jogador para um jogo do nível ${displayLevel} ${dayLabel} às ${timeLabel}.\nConsegues jogar? 😉`;
-    
-    openWhatsApp(player.phone, message, whatsappWindowRef);
-
-    if (sortedSelectedPlayers.length === 1) {
-      setTimeout(() => {
-        setSendingIndex(-1);
-        setSelectedIds([]);
-        setLastSelectedIds([]);
-        whatsappWindowRef.current = null;
-        toast({ title: "Sucesso", description: "Mensagem enviada!" });
-        setIsBulkMessageOpen(false);
-      }, 500);
-    }
-  };
-
-  const handleNextMessage = () => {
-    const selectedPlayers = players?.filter(p => lastSelectedIds.includes(p.id)) || [];
-    const sortedSelectedPlayers = lastSelectedIds.map(id => selectedPlayers.find(p => p.id === id)!).filter(Boolean);
-    
-    const nextIndex = sendingIndex + 1;
-    
-    if (nextIndex >= sortedSelectedPlayers.length) {
-      setSendingIndex(-1);
-      setIsBulkMessageOpen(false);
-      setSelectedIds([]);
-      setLastSelectedIds([]);
-      whatsappWindowRef.current = null;
-      toast({ title: "Sucesso", description: "Mensagens enviadas!" });
-      return;
-    }
-
-    setSendingIndex(nextIndex);
-    
-    const player = sortedSelectedPlayers[nextIndex];
-    const dayLabel = getDayLabel(gameDate!);
-    const timeLabel = `${gameHour}:${gameMinute}`;
-    const displayLevel = levelFilter !== "all" ? levelFilter : player.level;
-    const message = `Olá 👋\nFalta 1 jogador para um jogo do nível ${displayLevel} ${dayLabel} às ${timeLabel}.\nConsegues jogar? 😉`;
-    
-    openWhatsApp(player.phone, message, whatsappWindowRef);
-    whatsappWindowRef.current?.focus();
+    setSendResult(null);
+    sendWhatsappMutation.mutate({
+      messages: sortedSelectedPlayers.map((player) => ({
+        playerId: player.id,
+        message: buildInviteMessage(player),
+      })),
+    });
   };
 
   const handleIndividualWhatsapp = (player: Player) => {
+    setSendResult(null);
+    sendWhatsappMutation.reset();
     setIsBulkMessageOpen(true);
     setSelectedIds([player.id]);
   };
@@ -455,13 +469,23 @@ export default function Players() {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <Dialog open={isBulkMessageOpen} onOpenChange={setIsBulkMessageOpen}>
+          <Dialog
+            open={isBulkMessageOpen}
+            onOpenChange={(open) => {
+              setIsBulkMessageOpen(open);
+              if (!open) {
+                setSendResult(null);
+                sendWhatsappMutation.reset();
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button 
                 className="gap-2 bg-orange-600 text-white hover:bg-orange-500"
                 disabled={selectedIds.length === 0}
                 onClick={() => {
-                  setLastSelectedIds([...selectedIds]);
+                  setSendResult(null);
+                  sendWhatsappMutation.reset();
                 }}
               >
                 <SiWhatsapp className="w-5 h-5" />
@@ -537,40 +561,85 @@ export default function Players() {
                   <p className="font-semibold mb-2 text-slate-500 uppercase text-[10px]">Pré-visualização:</p>
                   <div className="whitespace-pre-wrap italic">
                     Olá 👋{"\n"}
-                    Falta 1 jogador para um jogo do nível {levelFilter !== "all" ? levelFilter : "[Nível]"} {gameDate ? getDayLabel(gameDate) : "[Dia]"} às {gameHour}:{gameMinute}.{"\n"}
+                    Falta 1 jogador para um jogo do nível {previewLevel} {gameDate ? getDayLabel(gameDate) : "[Dia]"} às {gameHour}:{gameMinute}.{"\n"}
                     Consegues jogar? 😉
                   </div>
                 </div>
 
-                {sendingIndex === -1 ? (
-                  <Button 
-                    className="w-full bg-orange-600 hover:bg-orange-500 h-12 text-lg" 
-                    onClick={handleBulkWhatsapp}
-                    disabled={selectedIds.length === 0 || !gameDate}
-                  >
-                    Iniciar Envio ({selectedIds.length})
-                  </Button>
-                ) : (
-                  <div className="space-y-3">
-                    <p className="text-center text-sm font-medium text-blue-600 animate-pulse">
-                      A processar jogador {sendingIndex + 1} de {lastSelectedIds.length}...
-                    </p>
-                    <Button 
-                      className={`w-full h-12 text-lg ${sendingIndex + 1 >= lastSelectedIds.length ? 'bg-orange-600 hover:bg-orange-500' : ''}`}
-                      onClick={handleNextMessage}
-                    >
-                      {sendingIndex + 1 >= lastSelectedIds.length ? 'Terminar' : 'Próximo Jogador'}
-                    </Button>
-                    <Button 
-                      variant="ghost"
-                      className="w-full" 
-                      onClick={() => {
-                        setSendingIndex(-1);
-                        setLastSelectedIds([]);
-                      }}
-                    >
-                      Cancelar
-                    </Button>
+                <Button 
+                  className="w-full bg-orange-600 hover:bg-orange-500 h-12 text-lg" 
+                  onClick={handleBulkWhatsapp}
+                  disabled={selectedIds.length === 0 || !gameDate || sendWhatsappMutation.isPending}
+                >
+                  {sendWhatsappMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      A enviar...
+                    </>
+                  ) : (
+                    <>Enviar automaticamente ({selectedIds.length})</>
+                  )}
+                </Button>
+
+                {sendResult && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium">
+                        {sendResult.mode === "mock"
+                          ? "Mock local"
+                          : sendResult.mode === "manual"
+                            ? "Manual"
+                            : "Evolution API"}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {sendResult.sent} OK
+                        {sendResult.manual > 0 ? ` / ${sendResult.manual} manuais` : ""}
+                        {" / "}
+                        {sendResult.failed} falhas / {sendResult.skipped} ignoradas
+                      </span>
+                    </div>
+                    <div className="mt-3 max-h-36 space-y-2 overflow-y-auto">
+                      {sendResult.results.map((result) => (
+                        <div key={`${result.playerId}-${result.status}`} className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{result.name}</p>
+                            {result.error && <p className="text-xs text-destructive">{result.error}</p>}
+                          </div>
+                          <Badge
+                            variant={
+                              result.status === "failed"
+                                ? "destructive"
+                                : result.status === "skipped"
+                                  ? "outline"
+                                  : "secondary"
+                            }
+                          >
+                            {result.status === "mock_sent" ? "mock" : result.status}
+                          </Badge>
+                          {(result.status === "manual" || result.status === "failed") && result.fallbackUrl && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1 px-2 text-xs"
+                              onClick={() => window.open(result.fallbackUrl, "_blank")}
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              Abrir
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {sendResult.fallbackUrl && sendResult.failed + sendResult.skipped + sendResult.manual > 0 && (
+                      <Button
+                        variant="outline"
+                        className="mt-3 w-full gap-2"
+                        onClick={() => window.open(sendResult.fallbackUrl, "_blank")}
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                        Abrir WhatsApp manual
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>

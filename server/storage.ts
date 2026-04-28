@@ -24,8 +24,9 @@ import {
   type AuthorizedUser,
   type InsertAuthorizedUser,
 } from "../shared/schema.js";
-import { db } from "./db.js";
+import { db, hasDatabase } from "./db.js";
 import { eq, and, or, ilike, desc, count, sql, inArray } from "drizzle-orm";
+import { LocalStorage } from "./local-storage.js";
 
 type DbExecutor = typeof db;
 type NonstopEventStatus = "draft" | "active" | "completed" | "cancelled";
@@ -1034,4 +1035,14 @@ export class DatabaseStorage implements IStorage {
   }
 }
 
-export const storage = new DatabaseStorage();
+const shouldUseLocalStorage =
+  process.env.LOCAL_DATA_MODE?.trim().toLowerCase() === "mock" ||
+  (!hasDatabase && process.env.NODE_ENV !== "production");
+
+if (shouldUseLocalStorage) {
+  console.warn("[startup] using in-memory local storage. Data resets when the dev server restarts.");
+}
+
+export const storage: IStorage = shouldUseLocalStorage
+  ? new LocalStorage()
+  : new DatabaseStorage();

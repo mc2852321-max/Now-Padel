@@ -160,12 +160,72 @@ export type PlayersListResponse = {
   totalPages: number;
 };
 
+export const messageRecipientSchema = z.object({
+  playerId: z.number().int().positive(),
+  message: z.string().trim().min(1),
+});
+
 export const messageSchema = z.object({
-  playerIds: z.array(z.number()),
-  message: z.string(),
+  playerIds: z.array(z.number().int().positive()).optional(),
+  message: z.string().trim().min(1).optional(),
+  messages: z.array(messageRecipientSchema).optional(),
+}).superRefine((value, ctx) => {
+  if (value.messages && value.messages.length > 0) return;
+  if (value.playerIds && value.playerIds.length > 0 && value.message) return;
+
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: "Indica pelo menos um jogador e uma mensagem.",
+    path: ["playerIds"],
+  });
 });
 
 export type MessageRequest = z.infer<typeof messageSchema>;
+
+export const whatsappSendResultSchema = z.object({
+  playerId: z.number().int().positive(),
+  name: z.string(),
+  phone: z.string(),
+  number: z.string().nullable(),
+  status: z.enum(["mock_sent", "sent", "manual", "failed", "skipped"]),
+  fallbackUrl: z.string().optional(),
+  providerMessageId: z.string().optional(),
+  error: z.string().optional(),
+});
+
+export const whatsappSendResponseSchema = z.object({
+  success: z.boolean(),
+  mode: z.enum(["mock", "evolution", "manual"]),
+  total: z.number().int().min(0),
+  sent: z.number().int().min(0),
+  manual: z.number().int().min(0),
+  failed: z.number().int().min(0),
+  skipped: z.number().int().min(0),
+  results: z.array(whatsappSendResultSchema),
+  fallbackUrl: z.string().optional(),
+});
+
+export type WhatsappSendResult = z.infer<typeof whatsappSendResultSchema>;
+export type WhatsappSendResponse = z.infer<typeof whatsappSendResponseSchema>;
+
+export const whatsappStatusResponseSchema = z.object({
+  mode: z.enum(["mock", "evolution", "manual"]),
+  senderNumber: z.string().nullable(),
+  evolution: z.object({
+    configured: z.boolean(),
+    apiUrlConfigured: z.boolean(),
+    apiKeyConfigured: z.boolean(),
+    instanceConfigured: z.boolean(),
+    instance: z.string().nullable(),
+    connectionState: z.string().nullable().optional(),
+    ownerNumber: z.string().nullable().optional(),
+    profileName: z.string().nullable().optional(),
+    senderMatchesInstance: z.boolean().optional(),
+    error: z.string().optional(),
+  }),
+});
+
+export type WhatsappStatusResponse = z.infer<typeof whatsappStatusResponseSchema>;
 
 export const rankingImportRowSchema = z.object({
   playerId: z.number().int().positive(),

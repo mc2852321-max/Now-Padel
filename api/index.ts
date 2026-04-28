@@ -1,3 +1,4 @@
+import "../server/env.js";
 import { createServer } from "http";
 import express from "express";
 import { registerRoutes } from "../server/routes.js";

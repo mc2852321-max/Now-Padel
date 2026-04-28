@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { players, insertPlayerSchema, messageSchema } from './schema.js';
+import { players, insertPlayerSchema, messageSchema, whatsappSendResponseSchema, whatsappStatusResponseSchema } from './schema.js';
 
 export const errorSchemas = {
   validation: z.object({
@@ -62,12 +62,19 @@ export const api = {
     },
   },
   whatsapp: {
+    status: {
+      method: 'GET' as const,
+      path: '/api/whatsapp/status',
+      responses: {
+        200: whatsappStatusResponseSchema,
+      },
+    },
     send: {
       method: 'POST' as const,
       path: '/api/whatsapp/send',
       input: messageSchema,
       responses: {
-        200: z.object({ success: z.boolean(), url: z.string() }),
+        200: whatsappSendResponseSchema,
       },
     },
   },

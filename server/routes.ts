@@ -10,6 +10,7 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import pg from "pg";
 import { db } from "./db.js";
+import { getWhatsappStatus, sendWhatsappMessages } from "./whatsapp.js";
 
 const databaseUrl =
   process.env.DATABASE_URL ||
@@ -1073,22 +1074,47 @@ export async function registerRoutes(
     res.status(204).end();
   });
 
+  app.get(api.whatsapp.status.path, isAuthenticated, async (_req, res) => {
+    res.json(await getWhatsappStatus());
+  });
+
   app.post(api.whatsapp.send.path, isAuthenticated, async (req, res) => {
     try {
-      const { playerIds, message } = api.whatsapp.send.input.parse(req.body);
+      const input = api.whatsapp.send.input.parse(req.body);
       const allPlayers = await storage.getPlayers();
-      const selectedPlayers = allPlayers.filter(p => playerIds.includes(p.id));
-      
-      const phoneNumbers = selectedPlayers.map(p => p.phone).join(',');
-      const whatsappUrl = `https://web.whatsapp.com/send?text=${encodeURIComponent(message)}&phone=${phoneNumbers}`;
-      
-      res.json({ success: true, url: whatsappUrl });
+
+      const requestedMessages = input.messages?.length
+        ? input.messages
+        : input.playerIds!.map((playerId) => ({
+            playerId,
+            message: input.message!,
+          }));
+
+      const playersById = new Map(allPlayers.map((player) => [player.id, player]));
+      const response = await sendWhatsappMessages(
+        requestedMessages.map((recipient) => ({
+          playerId: recipient.playerId,
+          player: playersById.get(recipient.playerId) ?? null,
+          message: recipient.message,
+        })),
+      );
+
+      res.json(response);
     } catch (err) {
-      res.status(400).json({ message: "Invalid request" });
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("[whatsapp/send] error:", err);
+      res.status(500).json({ message: "Erro ao enviar WhatsApp" });
     }
   });
 
   // Seed data with new levels
+  if (!databaseUrl) {
+    console.warn("[startup] skipping database schema setup because DATABASE_URL is not set.");
+    return httpServer;
+  }
+
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS players (

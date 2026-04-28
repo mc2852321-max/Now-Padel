@@ -3,12 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormDescription, FormMessage } from "@/components/ui/form";
+import { Badge } from "@/components/ui/badge";
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
-import { Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Eye, EyeOff } from "lucide-react";
+import { Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Settings as SettingsType, AuthorizedUser } from "@shared/schema";
+import type { Settings as SettingsType, AuthorizedUser, WhatsappStatusResponse } from "@shared/schema";
 import { useEffect, useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -27,6 +28,15 @@ function getConfiguredDuration(soundType: string, config?: DurationConfig) {
   const fallback = Math.max(1, config?.airHornDuration ?? 5);
   const configured = Math.max(1, config?.soundDurationSeconds ?? fallback);
   return soundType === (config?.soundDurationTarget ?? "air-horn") ? configured : null;
+}
+
+function formatPhoneNumber(value?: string | null) {
+  if (!value) return "-";
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("351")) {
+    return `+351 ${digits.slice(3, 6)} ${digits.slice(6, 9)} ${digits.slice(9)}`;
+  }
+  return value;
 }
 
 export function playPreviewSound(soundType: string, config?: DurationConfig) {
@@ -361,6 +371,101 @@ function AuthorizedUsersSection() {
   );
 }
 
+function WhatsAppStatusSection() {
+  const { data, isLoading, isFetching, refetch, error } = useQuery<WhatsappStatusResponse>({
+    queryKey: ["/api/whatsapp/status"],
+  });
+
+  const modeLabel = data?.mode === "evolution"
+    ? "Evolution API"
+    : data?.mode === "manual"
+      ? "Manual"
+      : "Mock local";
+
+  const statusLabel = (() => {
+    if (isLoading) return "A carregar";
+    if (error) return "Erro";
+    if (!data) return "Indisponivel";
+    if (data.mode === "manual") return "Fallback manual";
+    if (data.mode === "mock") return "Teste local";
+    if (!data.evolution.configured) return "Por configurar";
+    if (data.evolution.connectionState === "open" && data.evolution.senderMatchesInstance !== false) return "Ligado";
+    return "Atencao";
+  })();
+
+  const statusVariant =
+    statusLabel === "Ligado" || statusLabel === "Fallback manual" || statusLabel === "Teste local"
+      ? "secondary"
+      : statusLabel === "A carregar"
+        ? "outline"
+        : "destructive";
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle>WhatsApp</CardTitle>
+            <CardDescription>Estado do envio de mensagens.</CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant={statusVariant}>{statusLabel}</Badge>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => refetch()}
+              disabled={isFetching}
+            >
+              {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Atualizar
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-3 text-sm md:grid-cols-2">
+          <div className="rounded-md border p-3">
+            <p className="text-xs uppercase text-muted-foreground">Modo</p>
+            <p className="mt-1 font-medium">{isLoading ? "..." : modeLabel}</p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs uppercase text-muted-foreground">Instancia</p>
+            <p className="mt-1 font-medium">{data?.evolution.instance || "-"}</p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs uppercase text-muted-foreground">Numero esperado</p>
+            <p className="mt-1 font-medium">{formatPhoneNumber(data?.senderNumber)}</p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs uppercase text-muted-foreground">Numero ligado</p>
+            <p className="mt-1 font-medium">{formatPhoneNumber(data?.evolution.ownerNumber)}</p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs uppercase text-muted-foreground">Estado Evolution</p>
+            <p className="mt-1 font-medium">{data?.evolution.connectionState || "-"}</p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs uppercase text-muted-foreground">Perfil</p>
+            <p className="mt-1 font-medium">{data?.evolution.profileName || "-"}</p>
+          </div>
+        </div>
+        {data?.evolution.senderMatchesInstance === false && (
+          <p className="mt-4 text-sm text-destructive">
+            O numero ligado na Evolution nao coincide com o numero esperado.
+          </p>
+        )}
+        {(data?.evolution.error || error) && (
+          <p className="mt-4 text-sm text-destructive">
+            {data?.evolution.error || (error instanceof Error ? error.message : "Nao foi possivel consultar o estado.")}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ChangePasswordSection() {
   const { toast } = useToast();
   const [currentPassword, setCurrentPassword] = useState("");
@@ -617,14 +722,15 @@ export default function Settings() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4 h-auto">
+        <TabsList className="grid w-full grid-cols-5 h-auto">
           <TabsTrigger className="text-[11px] sm:text-sm" value="nonstop" data-testid="tab-nonstop">Non Stop</TabsTrigger>
           <TabsTrigger className="text-[11px] sm:text-sm" value="visual" data-testid="tab-visual">Identidade Visual</TabsTrigger>
           <TabsTrigger className="text-[11px] sm:text-sm" value="players" data-testid="tab-players">Jogadores</TabsTrigger>
+          <TabsTrigger className="text-[11px] sm:text-sm" value="whatsapp" data-testid="tab-whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger className="text-[11px] sm:text-sm" value="access" data-testid="tab-access">Acesso</TabsTrigger>
         </TabsList>
 
-        {activeTab !== "access" && (
+        {activeTab !== "access" && activeTab !== "whatsapp" && (
           <Form {...form}>
             <form onSubmit={form.handleSubmit((data) => mutation.mutate(data))} className="space-y-6">
               <TabsContent value="nonstop" className="space-y-6 mt-6" forceMount={activeTab === "nonstop" ? true : undefined}>
@@ -1172,6 +1278,10 @@ export default function Settings() {
             </form>
           </Form>
         )}
+
+        <TabsContent value="whatsapp" className="space-y-6 mt-6">
+          <WhatsAppStatusSection />
+        </TabsContent>
 
         <TabsContent value="access" className="space-y-6 mt-6">
           <ChangePasswordSection />

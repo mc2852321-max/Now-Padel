@@ -91,6 +91,7 @@ type PlayersPageResponse = {
 
 export default function Players() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [selectedPlayersById, setSelectedPlayersById] = useState<Map<number, Player>>(() => new Map());
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [profileTagFilter, setProfileTagFilter] = useState<string[]>([]);
   const [searchText, setSearchText] = useState<string>("");
@@ -167,9 +168,11 @@ export default function Players() {
   const players = data?.items ?? [];
   const totalPlayers = data?.total ?? 0;
   const totalPages = data?.totalPages ?? 1;
+  const selectedIdSet = new Set(selectedIds);
   const selectedPlayersForPreview = selectedIds
-    .map((id) => players.find((player) => player.id === id))
+    .map((id) => selectedPlayersById.get(id))
     .filter((player): player is Player => Boolean(player));
+  const allVisiblePlayersSelected = players.length > 0 && players.every((player) => selectedIdSet.has(player.id));
   const previewLevel = (() => {
     if (levelFilter !== "all") return levelFilter;
     if (selectedPlayersForPreview.length === 1) return selectedPlayersForPreview[0].level;
@@ -179,8 +182,23 @@ export default function Players() {
   })();
 
   useEffect(() => {
-    setSelectedIds([]);
-  }, [page, pageSize, levelFilter, profileTagFilter, debouncedSearchText]);
+    if (players.length === 0 || selectedIds.length === 0) return;
+
+    const selectedIdsInView = new Set(selectedIds);
+    setSelectedPlayersById((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+
+      players.forEach((player) => {
+        if (!selectedIdsInView.has(player.id)) return;
+        if (next.get(player.id) === player) return;
+        next.set(player.id, player);
+        changed = true;
+      });
+
+      return changed ? next : prev;
+    });
+  }, [players, selectedIds]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -279,32 +297,55 @@ export default function Players() {
     return <div className="flex items-center justify-center h-64">A carregar jogadores...</div>;
   }
 
-  const toggleSelect = (id: number) => {
-    setSelectedIds(prev => 
-      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-    );
+  const toggleSelect = (player: Player) => {
+    if (selectedIdSet.has(player.id)) {
+      setSelectedIds((prev) => prev.filter((id) => id !== player.id));
+      setSelectedPlayersById((prev) => {
+        const next = new Map(prev);
+        next.delete(player.id);
+        return next;
+      });
+      return;
+    }
+
+    setSelectedIds((prev) => prev.includes(player.id) ? prev : [...prev, player.id]);
+    setSelectedPlayersById((prev) => new Map(prev).set(player.id, player));
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === players.length) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(players.map(p => p.id));
+    const visibleIds = players.map((player) => player.id);
+
+    if (allVisiblePlayersSelected) {
+      const visibleIdSet = new Set(visibleIds);
+      setSelectedIds((prev) => prev.filter((id) => !visibleIdSet.has(id)));
+      setSelectedPlayersById((prev) => {
+        const next = new Map(prev);
+        visibleIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      return;
     }
+
+    setSelectedIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    setSelectedPlayersById((prev) => {
+      const next = new Map(prev);
+      players.forEach((player) => next.set(player.id, player));
+      return next;
+    });
   };
 
   const handleBulkWhatsapp = () => {
     if (selectedIds.length === 0 || !gameDate) return;
     const currentSelected = [...selectedIds];
-    const selectedPlayers = players?.filter(p => currentSelected.includes(p.id)) || [];
+    const selectedPlayers = currentSelected
+      .map((id) => selectedPlayersById.get(id))
+      .filter((player): player is Player => Boolean(player));
     
     if (selectedPlayers.length === 0) return;
 
-    const sortedSelectedPlayers = currentSelected.map(id => selectedPlayers.find(p => p.id === id)!).filter(Boolean);
-
     setSendResult(null);
     sendWhatsappMutation.mutate({
-      messages: sortedSelectedPlayers.map((player) => ({
+      messages: selectedPlayers.map((player) => ({
         playerId: player.id,
         message: buildInviteMessage(player),
       })),
@@ -316,6 +357,7 @@ export default function Players() {
     sendWhatsappMutation.reset();
     setIsBulkMessageOpen(true);
     setSelectedIds([player.id]);
+    setSelectedPlayersById(new Map([[player.id, player]]));
   };
 
   const renderProfileTags = (player: Player) => {
@@ -679,7 +721,7 @@ export default function Players() {
               <TableRow>
                 <TableHead className="w-12 px-4">
                   <Checkbox 
-                    checked={selectedIds.length === players.length && players.length > 0}
+                    checked={allVisiblePlayersSelected}
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
@@ -693,11 +735,11 @@ export default function Players() {
             </TableHeader>
             <TableBody>
               {players.map((player) => (
-                <TableRow key={player.id} className={selectedIds.includes(player.id) ? "bg-muted/50" : ""}>
+                <TableRow key={player.id} className={selectedIdSet.has(player.id) ? "bg-muted/50" : ""}>
                   <TableCell className="px-4">
                     <Checkbox 
-                      checked={selectedIds.includes(player.id)}
-                      onCheckedChange={() => toggleSelect(player.id)}
+                      checked={selectedIdSet.has(player.id)}
+                      onCheckedChange={() => toggleSelect(player)}
                     />
                   </TableCell>
                   <TableCell className="font-medium">{player.name}</TableCell>
@@ -730,14 +772,14 @@ export default function Players() {
             key={`mobile-${player.id}`}
             className={cn(
               "overflow-hidden",
-              selectedIds.includes(player.id) && "border-orange-400 bg-orange-50/50",
+              selectedIdSet.has(player.id) && "border-orange-400 bg-orange-50/50",
             )}
           >
             <CardContent className="space-y-4 p-4">
               <div className="flex items-start gap-3">
                 <Checkbox
-                  checked={selectedIds.includes(player.id)}
-                  onCheckedChange={() => toggleSelect(player.id)}
+                  checked={selectedIdSet.has(player.id)}
+                  onCheckedChange={() => toggleSelect(player)}
                   aria-label={`Selecionar ${player.name}`}
                   className="mt-1"
                 />

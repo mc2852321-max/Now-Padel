@@ -62,6 +62,51 @@ Recommended production shape:
 - A dedicated WhatsApp number for the club.
 - One instance, for example `now-padel`, paired with that WhatsApp number.
 
+## Create And Pair A Baileys Instance
+
+In the Evolution API docs, use `Instances > Create Instance` with `WHATSAPP-BAILEYS`. Do not use WhatsApp Cloud API/Facebook Business for this setup.
+
+Most fields in the docs example are optional. For the test number, the minimal create request is:
+
+```bash
+curl --request POST \
+  --url "$EVOLUTION_API_URL/instance/create" \
+  --header "Content-Type: application/json" \
+  --header "apikey: $EVOLUTION_API_KEY" \
+  --data '{
+    "instanceName": "now-padel-test",
+    "integration": "WHATSAPP-BAILEYS",
+    "qrcode": true,
+    "number": "351914742002"
+  }'
+```
+
+Then request the connection QR or pairing code:
+
+```bash
+curl --request GET \
+  --url "$EVOLUTION_API_URL/instance/connect/now-padel-test?number=351914742002" \
+  --header "apikey: $EVOLUTION_API_KEY"
+```
+
+After pairing in WhatsApp, validate the connection state:
+
+```bash
+curl --request GET \
+  --url "$EVOLUTION_API_URL/instance/connectionState/now-padel-test" \
+  --header "apikey: $EVOLUTION_API_KEY"
+```
+
+The expected connected state is:
+
+```json
+{
+  "instance": {
+    "state": "open"
+  }
+}
+```
+
 ## First Production Test
 
 1. Deploy the Now Padel app with `WHATSAPP_SEND_MODE=manual` first.

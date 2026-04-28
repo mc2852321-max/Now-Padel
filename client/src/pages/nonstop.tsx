@@ -111,7 +111,7 @@ export default function Nonstop() {
 
   const selectedHistoryEvent = events.find((event) => event.id === selectedHistoryEventId) ?? null;
   const readOnlyMode = viewMode === "history";
-  const editableEvent = viewMode === "history" ? selectedHistoryEvent : (currentEvent ?? null);
+  const editableEvent = currentEvent ?? null;
   const [eventDateInput, setEventDateInput] = useState(toLisbonDayKey(new Date()));
   const [eventTimeInput, setEventTimeInput] = useState("21:30");
 
@@ -1602,6 +1602,13 @@ export default function Nonstop() {
 
   const stats = getStandings();
   const daysWithEvents = events.map((event) => new Date(event.startedAt ?? event.createdAt));
+  const showHistoryEmptyState = viewMode === "history" && !selectedHistoryEventId;
+  const historyEmptyTitle = eventsForSelectedDate.length === 0
+    ? "Sem Non Stops neste dia"
+    : "Seleciona um Non Stop";
+  const historyEmptyDescription = eventsForSelectedDate.length === 0
+    ? "Escolhe outro dia no calendario para consultar o historico."
+    : "Este dia tem mais do que um Non Stop. Escolhe o horario para carregar os resultados.";
 
   return (
     <div
@@ -1735,45 +1742,6 @@ export default function Nonstop() {
               <Badge variant="outline" className="h-11 rounded-lg border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-600 shadow-sm">
                 {eventsForSelectedDate.length === 0 ? "Sem eventos neste dia" : "Seleciona um horario"}
               </Badge>
-            ) : null}
-
-            {editableEvent ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Input
-                  type="date"
-                  value={eventDateInput}
-                  onChange={(event) => setEventDateInput(event.target.value)}
-                  className="h-11 w-[152px] rounded-lg border-slate-200 bg-white/90 px-3 text-[14px] font-medium text-slate-900 shadow-sm"
-                  title="Dia do Non Stop"
-                />
-                <Input
-                  type="time"
-                  value={eventTimeInput}
-                  onChange={(event) => setEventTimeInput(event.target.value)}
-                  className="h-11 w-[104px] rounded-lg border-slate-200 bg-white/90 px-3 text-[14px] font-medium text-slate-900 shadow-sm"
-                  title="Hora do Non Stop"
-                />
-                <Button
-                  size="sm"
-                  className="h-11 gap-1.5 rounded-lg bg-orange-600 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-orange-500"
-                  disabled={
-                    updateEventMetadataMutation.isPending ||
-                    !eventDateInput ||
-                    !eventTimeInput
-                  }
-                  onClick={() => {
-                    updateEventMetadataMutation.mutate({
-                      id: editableEvent.id,
-                      eventDate: eventDateInput,
-                      eventTime: eventTimeInput,
-                    });
-                  }}
-                  title="Guardar data e hora"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  Guardar
-                </Button>
-              </div>
             ) : null}
           </div>
           <Card className={cn(
@@ -2027,6 +1995,50 @@ export default function Nonstop() {
             </AlertDialog>
           </div>
 
+          {editableEvent && !readOnlyMode ? (
+            <div className={cn("flex flex-wrap items-end gap-1.5 rounded-lg border border-white/70 bg-white/75 p-1.5 shadow-sm backdrop-blur", isPresentationMode && "hidden")}>
+              <div className="flex flex-col gap-1">
+                <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600">Data do Non Stop</span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Input
+                    type="date"
+                    value={eventDateInput}
+                    onChange={(event) => setEventDateInput(event.target.value)}
+                    className="h-9 w-[142px] rounded-md border-slate-200 bg-white/95 px-2.5 text-[12px] font-medium text-slate-900 shadow-sm"
+                    title="Dia do Non Stop"
+                  />
+                  <Input
+                    type="time"
+                    value={eventTimeInput}
+                    onChange={(event) => setEventTimeInput(event.target.value)}
+                    className="h-9 w-[98px] rounded-md border-slate-200 bg-white/95 px-2.5 text-[12px] font-medium text-slate-900 shadow-sm"
+                    title="Hora do Non Stop"
+                  />
+                  <Button
+                    size="sm"
+                    className="h-9 gap-1.5 rounded-md bg-orange-600 px-2.5 text-[11px] font-semibold text-white shadow-sm hover:bg-orange-500"
+                    disabled={
+                      updateEventMetadataMutation.isPending ||
+                      !eventDateInput ||
+                      !eventTimeInput
+                    }
+                    onClick={() => {
+                      updateEventMetadataMutation.mutate({
+                        id: editableEvent.id,
+                        eventDate: eventDateInput,
+                        eventTime: eventTimeInput,
+                      });
+                    }}
+                    title="Guardar data e hora"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Guardar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className={cn(isPresentationMode && "hidden")}>
             <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
             <DialogTrigger asChild>
@@ -2130,6 +2142,25 @@ export default function Nonstop() {
         </div>
       </div>
 
+      {showHistoryEmptyState ? (
+        <Card className="border-2 border-dashed border-slate-300 bg-white/75 shadow-sm backdrop-blur">
+          <CardContent className="flex min-h-[260px] flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+            <History className="h-10 w-10 text-orange-600" />
+            <div className="space-y-1">
+              <h3 className="text-xl font-semibold text-slate-900">{historyEmptyTitle}</h3>
+              <p className="max-w-md text-sm text-muted-foreground">{historyEmptyDescription}</p>
+            </div>
+            {eventsForSelectedDate.length > 1 ? (
+              <Button
+                className="mt-2 bg-orange-600 text-white hover:bg-orange-500"
+                onClick={() => setIsHistoryDrawerOpen(true)}
+              >
+                Escolher horario
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : (
       <div className={cn("space-y-2", isPresentationMode && "space-y-1 -mt-2")}>
         <div className={cn("pt-1 2xl:sticky 2xl:top-0 2xl:z-50", isPresentationMode && "pt-0")}>
           <Card className="overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-xl">
@@ -2292,6 +2323,7 @@ export default function Nonstop() {
         })}
       </div>
       </div>
+      )}
 
       <Drawer open={isHistoryDrawerOpen} onOpenChange={setIsHistoryDrawerOpen}>
         <DrawerContent>

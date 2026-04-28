@@ -11,7 +11,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { fetchAllPlayers, type PlayersPageResponse } from "@/lib/players";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, Calendar as CalendarIcon, History, Save } from "lucide-react";
+import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, History, Save } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -1695,71 +1695,61 @@ export default function Nonstop() {
               >
                 Atual
               </ToggleGroupItem>
-              <ToggleGroupItem
-                value="history"
-                className="h-11 rounded-lg border border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-900 shadow-sm hover:bg-white data-[state=on]:border-orange-600 data-[state=on]:bg-orange-600 data-[state=on]:text-white"
-                onClick={() => {
-                  if (viewMode === "history") setIsCalendarOpen(true);
+              <Popover
+                open={isCalendarOpen}
+                onOpenChange={(open) => {
+                  if (viewMode !== "history") {
+                    setIsCalendarOpen(false);
+                    return;
+                  }
+                  setIsCalendarOpen(open);
                 }}
               >
-                <History className="w-3.5 h-3.5 mr-1" />
-                Histórico
-              </ToggleGroupItem>
+                <PopoverTrigger asChild>
+                  <ToggleGroupItem
+                    value="history"
+                    className="h-11 rounded-lg border border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-900 shadow-sm hover:bg-white data-[state=on]:border-orange-600 data-[state=on]:bg-orange-600 data-[state=on]:text-white"
+                    onClick={() => {
+                      if (viewMode === "history") setIsCalendarOpen(true);
+                    }}
+                  >
+                    <History className="w-3.5 h-3.5 mr-1" />
+                    Histórico
+                  </ToggleGroupItem>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={historyDate}
+                    onSelect={(date) => {
+                      setHistoryDate(date);
+                      if (!date) return;
+                      if (viewMode !== "history") setViewMode("history");
+                      const sameDay = getEventsByDate(date);
+                      if (sameDay.length === 1) {
+                        setSelectedHistoryEventId(sameDay[0].id);
+                        setIsHistoryDrawerOpen(false);
+                        setIsCalendarOpen(false);
+                      } else if (sameDay.length > 1) {
+                        setSelectedHistoryEventId(null);
+                        setIsHistoryDrawerOpen(true);
+                        setIsCalendarOpen(false);
+                      } else {
+                        setSelectedHistoryEventId(null);
+                        setIsHistoryDrawerOpen(false);
+                        setIsCalendarOpen(false);
+                        toast({
+                          title: "Sem eventos neste dia",
+                          description: "Escolhe outro dia no calendário para ver histórico.",
+                        });
+                      }
+                    }}
+                    modifiers={{ hasEvents: daysWithEvents }}
+                    modifiersClassNames={{ hasEvents: "bg-orange-100 text-orange-700 font-semibold" }}
+                  />
+                </PopoverContent>
+              </Popover>
             </ToggleGroup>
-
-            <Popover
-              open={isCalendarOpen}
-              onOpenChange={(open) => {
-                if (viewMode !== "history") {
-                  setIsCalendarOpen(false);
-                  return;
-                }
-                setIsCalendarOpen(open);
-              }}
-            >
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="h-11 rounded-lg border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-900 shadow-sm hover:bg-white hover:text-slate-900 disabled:bg-white/60"
-                  disabled={viewMode !== "history"}
-                  title={viewMode !== "history" ? "Ativa o modo Histórico para usar o calendário" : "Calendário"}
-                >
-                  <CalendarIcon className="w-4 h-4 mr-1" />
-                  Calendário
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={historyDate}
-                  onSelect={(date) => {
-                    setHistoryDate(date);
-                    if (!date) return;
-                    if (viewMode !== "history") setViewMode("history");
-                    const sameDay = getEventsByDate(date);
-                    if (sameDay.length === 1) {
-                      setSelectedHistoryEventId(sameDay[0].id);
-                      setIsHistoryDrawerOpen(false);
-                      setIsCalendarOpen(false);
-                    } else if (sameDay.length > 1) {
-                      setSelectedHistoryEventId(null);
-                      setIsHistoryDrawerOpen(true);
-                      setIsCalendarOpen(false);
-                    } else {
-                      setSelectedHistoryEventId(null);
-                      setIsHistoryDrawerOpen(false);
-                      setIsCalendarOpen(false);
-                      toast({
-                        title: "Sem eventos neste dia",
-                        description: "Escolhe outro dia no calendário para ver histórico.",
-                      });
-                    }
-                  }}
-                  modifiers={{ hasEvents: daysWithEvents }}
-                  modifiersClassNames={{ hasEvents: "bg-orange-100 text-orange-700 font-semibold" }}
-                />
-              </PopoverContent>
-            </Popover>
 
             {viewMode === "history" && !selectedHistoryEventId ? (
               <Badge variant="outline" className="h-11 rounded-lg border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-600 shadow-sm">
@@ -1772,8 +1762,8 @@ export default function Nonstop() {
             ) : null}
           </div>
           <Card className={cn(
-            "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[420px]",
-            isPresentationMode && "gap-2 px-3 py-1.5 sm:min-w-[360px] max-[900px]:gap-1.5 max-[900px]:px-2.5 max-[900px]:py-1",
+            "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[404px] md:mr-4",
+            isPresentationMode && "gap-2 px-3 py-1.5 sm:min-w-[360px] md:mr-0 max-[900px]:gap-1.5 max-[900px]:px-2.5 max-[900px]:py-1",
             isActive ? "bg-orange-950 border-orange-500" : "bg-slate-900 border-slate-800"
           )}>
             <div className={cn("flex flex-col w-[110px]", isPresentationMode && "w-[96px] max-[900px]:w-[88px]")}>

@@ -269,11 +269,12 @@ export default function Nonstop() {
 
   useEffect(() => {
     if (viewMode !== "history") return;
+    if (isCalendarOpen || isHistoryDrawerOpen) return;
     if (selectedHistoryEventId && events.some((event) => event.id === selectedHistoryEventId)) return;
     if (eventsForSelectedDate.length === 1) {
       setSelectedHistoryEventId(eventsForSelectedDate[0].id);
     }
-  }, [viewMode, selectedHistoryEventId, events, eventsForSelectedDate]);
+  }, [viewMode, isCalendarOpen, isHistoryDrawerOpen, selectedHistoryEventId, events, eventsForSelectedDate]);
 
   useEffect(() => {
     if (!editableEvent) {
@@ -309,12 +310,12 @@ export default function Nonstop() {
         }
       }
 
-      toast({ title: "Guardado", description: "Data e hora do historico atualizadas." });
+      toast({ title: "Guardado", description: "Data e hora do histórico atualizadas." });
     },
     onError: (error: any) => {
       toast({
         title: "Erro",
-        description: error?.message || "Nao foi possivel atualizar a data e hora do Non Stop.",
+        description: error?.message || "Não foi possível atualizar a data e hora do Non Stop.",
         variant: "destructive",
       });
     },
@@ -1077,7 +1078,7 @@ export default function Nonstop() {
       
       if (currentTeams.length === numTeams) {
         await rebuildSchedule(currentTeams);
-        toast({ title: "Calendario gerado", description: "Emparelhamentos criados sem repeticoes indevidas." });
+        toast({ title: "Calendário gerado", description: "Emparelhamentos criados sem repetições indevidas." });
       } else if ((results?.length || 0) > 0) {
         await apiRequest("POST", "/api/results/clear");
       }
@@ -1089,7 +1090,7 @@ export default function Nonstop() {
     onError: (error: any) => {
       toast({
         title: "Erro",
-        description: error?.message || "Nao foi possivel adicionar a dupla.",
+        description: error?.message || "Não foi possível adicionar a dupla.",
         variant: "destructive",
       });
     },
@@ -1115,7 +1116,7 @@ export default function Nonstop() {
     onError: (error: any) => {
       toast({
         title: "Erro",
-        description: error?.message || "Nao foi possivel atualizar a dupla.",
+        description: error?.message || "Não foi possível atualizar a dupla.",
         variant: "destructive",
       });
     },
@@ -1625,10 +1626,14 @@ export default function Nonstop() {
   const showHistoryEmptyState = viewMode === "history" && !selectedHistoryEventId;
   const historyEmptyTitle = eventsForSelectedDate.length === 0
     ? "Sem Non Stops neste dia"
+    : eventsForSelectedDate.length === 1
+    ? "Seleciona um dia"
     : "Seleciona um Non Stop";
   const historyEmptyDescription = eventsForSelectedDate.length === 0
-    ? "Escolhe outro dia no calendario para consultar o historico."
-    : "Este dia tem mais do que um Non Stop. Escolhe o horario para carregar os resultados.";
+    ? "Escolhe outro dia no calendário para consultar o histórico."
+    : eventsForSelectedDate.length === 1
+    ? "Escolhe um dia no calendário para carregar o histórico."
+    : "Este dia tem mais do que um Non Stop. Escolhe o horário para carregar os resultados.";
 
   return (
     <div
@@ -1651,7 +1656,7 @@ export default function Nonstop() {
           <h2 className="text-3xl font-bold tracking-tight uppercase">Nonstop {displayNumCourts} Campos</h2>
           {playersErrorMessage && (
             <p className="text-sm text-red-600">
-              Nao foi possivel carregar todos os jogadores. Tenta novamente dentro de instantes.
+              Não foi possível carregar todos os jogadores. Tenta novamente dentro de instantes.
             </p>
           )}
         </div>
@@ -1679,14 +1684,9 @@ export default function Nonstop() {
                 }
                 const fallbackDay = historyDate ?? new Date();
                 setHistoryDate(fallbackDay);
-                const sameDay = getEventsByDate(fallbackDay);
-                if (sameDay.length === 1) {
-                  setSelectedHistoryEventId(sameDay[0].id);
-                } else if (sameDay.length > 1) {
-                  setIsHistoryDrawerOpen(true);
-                } else {
-                  setSelectedHistoryEventId(null);
-                }
+                setSelectedHistoryEventId(null);
+                setIsHistoryDrawerOpen(false);
+                setIsCalendarOpen(true);
               }}
             >
               <ToggleGroupItem
@@ -1698,6 +1698,9 @@ export default function Nonstop() {
               <ToggleGroupItem
                 value="history"
                 className="h-11 rounded-lg border border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-900 shadow-sm hover:bg-white data-[state=on]:border-orange-600 data-[state=on]:bg-orange-600 data-[state=on]:text-white"
+                onClick={() => {
+                  if (viewMode === "history") setIsCalendarOpen(true);
+                }}
               >
                 <History className="w-3.5 h-3.5 mr-1" />
                 Histórico
@@ -1760,7 +1763,11 @@ export default function Nonstop() {
 
             {viewMode === "history" && !selectedHistoryEventId ? (
               <Badge variant="outline" className="h-11 rounded-lg border-slate-200 bg-white/80 px-3 text-[12px] font-medium text-slate-600 shadow-sm">
-                {eventsForSelectedDate.length === 0 ? "Sem eventos neste dia" : "Seleciona um horario"}
+                {eventsForSelectedDate.length === 0
+                  ? "Sem eventos neste dia"
+                  : eventsForSelectedDate.length === 1
+                  ? "Seleciona no calendário"
+                  : "Seleciona um horário"}
               </Badge>
             ) : null}
           </div>
@@ -1772,7 +1779,7 @@ export default function Nonstop() {
             <div className={cn("flex flex-col w-[110px]", isPresentationMode && "w-[96px] max-[900px]:w-[88px]")}>
               <span className={cn("text-[10px] uppercase tracking-widest text-orange-500 font-bold", isPresentationMode && "text-[9px] tracking-wider max-[900px]:text-[8px]")}>
                 {timerState === 'idle'
-                  ? 'Cronometro'
+                  ? 'Cronómetro'
                   : timerState === 'warmup'
                   ? 'Aquecimento'
                   : timerState === 'game'
@@ -2005,7 +2012,7 @@ export default function Nonstop() {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Finalizar evento atual?</AlertDialogTitle>
-                <AlertDialogDescription>O evento atual sera arquivado e um novo Non Stop vazio sera criado.</AlertDialogDescription>
+                <AlertDialogDescription>O evento atual será arquivado e um novo Non Stop vazio será criado.</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
@@ -2028,9 +2035,9 @@ export default function Nonstop() {
                 <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <span className="text-xs font-semibold uppercase text-slate-600">Data e hora no historico</span>
+                      <span className="text-xs font-semibold uppercase text-slate-600">Data e hora no histórico</span>
                       <p className="text-xs leading-snug text-slate-500">
-                        Fica registada no historico deste Non Stop.
+                        Fica registada no histórico deste Non Stop.
                       </p>
                     </div>
                     {hasEventMetadataChanges ? (
@@ -2190,7 +2197,7 @@ export default function Nonstop() {
                 className="mt-2 bg-orange-600 text-white hover:bg-orange-500"
                 onClick={() => setIsHistoryDrawerOpen(true)}
               >
-                Escolher horario
+                Escolher horário
               </Button>
             ) : null}
           </CardContent>

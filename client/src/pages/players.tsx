@@ -1,4 +1,4 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useMutation } from "@tanstack/react-query";
 import { type Player, type Settings, insertPlayerSchema, type MessageRequest, type WhatsappSendResponse } from "@shared/schema";
 import { api, buildUrl } from "@shared/routes";
 import {
@@ -94,6 +94,7 @@ export default function Players() {
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [profileTagFilter, setProfileTagFilter] = useState<string[]>([]);
   const [searchText, setSearchText] = useState<string>("");
+  const [debouncedSearchText, setDebouncedSearchText] = useState<string>("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
@@ -123,7 +124,15 @@ export default function Players() {
       ? profileTagFilter[0]
       : `${profileTagFilter.length} perfis`;
 
-  const queryKey = ["/api/players", { level: levelFilter, profileTags: profileTagFilter, search: searchText, page, pageSize }];
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearchText(searchText);
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [searchText]);
+
+  const queryKey = ["/api/players", { level: levelFilter, profileTags: profileTagFilter, search: debouncedSearchText, page, pageSize }];
 
   const { data, isLoading } = useQuery<PlayersPageResponse>({
     queryKey,
@@ -151,7 +160,8 @@ export default function Players() {
         return { items: [], total: 0, page: 1, pageSize: params.pageSize, totalPages: 1 };
       }
       return response as PlayersPageResponse;
-    }
+    },
+    placeholderData: keepPreviousData,
   });
 
   const players = data?.items ?? [];
@@ -170,7 +180,7 @@ export default function Players() {
 
   useEffect(() => {
     setSelectedIds([]);
-  }, [page, pageSize, levelFilter, profileTagFilter, searchText]);
+  }, [page, pageSize, levelFilter, profileTagFilter, debouncedSearchText]);
 
   useEffect(() => {
     if (page > totalPages) {

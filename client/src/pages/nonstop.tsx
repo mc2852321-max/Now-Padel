@@ -309,7 +309,7 @@ export default function Nonstop() {
         }
       }
 
-      toast({ title: "Guardado", description: "Data e hora do Non Stop atualizadas." });
+      toast({ title: "Guardado", description: "Data e hora do historico atualizadas." });
     },
     onError: (error: any) => {
       toast({
@@ -319,6 +319,26 @@ export default function Nonstop() {
       });
     },
   });
+  const currentEventDateKey = editableEvent
+    ? toLisbonDayKey(editableEvent.startedAt ?? editableEvent.createdAt)
+    : "";
+  const currentEventTimeKey = editableEvent
+    ? toLisbonTimeKey(editableEvent.startedAt ?? editableEvent.createdAt) || "21:30"
+    : "";
+  const hasEventMetadataChanges = Boolean(
+    editableEvent &&
+      eventDateInput &&
+      eventTimeInput &&
+      (eventDateInput !== currentEventDateKey || eventTimeInput !== currentEventTimeKey),
+  );
+  const saveEventMetadata = async () => {
+    if (!editableEvent || !eventDateInput || !eventTimeInput) return null;
+    return updateEventMetadataMutation.mutateAsync({
+      id: editableEvent.id,
+      eventDate: eventDateInput,
+      eventTime: eventTimeInput,
+    });
+  };
 
   const syncTimerMutation = useMutation({
     mutationFn: async (payload: {
@@ -1636,7 +1656,8 @@ export default function Nonstop() {
           )}
         </div>
         
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col items-start gap-3 md:items-end">
+          <div className="flex flex-wrap items-center justify-start gap-2 md:justify-end">
           <div
             className={cn(
               "w-full sm:w-auto flex flex-wrap items-center gap-1.5 rounded-xl border border-white/70 bg-white/70 p-1.5 shadow-sm backdrop-blur-md",
@@ -1930,7 +1951,9 @@ export default function Nonstop() {
               </Link>
             </div>
           </Card>
+          </div>
 
+          <div className={cn("flex flex-wrap items-center justify-start gap-2 md:justify-end", isPresentationMode && "gap-1")}>
           <Button
             variant={isPresentationMode ? "default" : "outline"}
             size="sm"
@@ -1995,50 +2018,6 @@ export default function Nonstop() {
             </AlertDialog>
           </div>
 
-          {editableEvent && !readOnlyMode ? (
-            <div className={cn("flex flex-wrap items-end gap-1.5 rounded-lg border border-white/70 bg-white/75 p-1.5 shadow-sm backdrop-blur", isPresentationMode && "hidden")}>
-              <div className="flex flex-col gap-1">
-                <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600">Data do Non Stop</span>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Input
-                    type="date"
-                    value={eventDateInput}
-                    onChange={(event) => setEventDateInput(event.target.value)}
-                    className="h-9 w-[142px] rounded-md border-slate-200 bg-white/95 px-2.5 text-[12px] font-medium text-slate-900 shadow-sm"
-                    title="Dia do Non Stop"
-                  />
-                  <Input
-                    type="time"
-                    value={eventTimeInput}
-                    onChange={(event) => setEventTimeInput(event.target.value)}
-                    className="h-9 w-[98px] rounded-md border-slate-200 bg-white/95 px-2.5 text-[12px] font-medium text-slate-900 shadow-sm"
-                    title="Hora do Non Stop"
-                  />
-                  <Button
-                    size="sm"
-                    className="h-9 gap-1.5 rounded-md bg-orange-600 px-2.5 text-[11px] font-semibold text-white shadow-sm hover:bg-orange-500"
-                    disabled={
-                      updateEventMetadataMutation.isPending ||
-                      !eventDateInput ||
-                      !eventTimeInput
-                    }
-                    onClick={() => {
-                      updateEventMetadataMutation.mutate({
-                        id: editableEvent.id,
-                        eventDate: eventDateInput,
-                        eventTime: eventTimeInput,
-                      });
-                    }}
-                    title="Guardar data e hora"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    Guardar
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
           <div className={cn(isPresentationMode && "hidden")}>
             <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
             <DialogTrigger asChild>
@@ -2046,12 +2025,71 @@ export default function Nonstop() {
                 <Plus className="w-4 h-4" /> Adicionar dupla
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="sm:max-w-lg">
               <DialogHeader><DialogTitle>Adicionar dupla</DialogTitle></DialogHeader>
+              {editableEvent && !readOnlyMode ? (
+                <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-semibold uppercase text-slate-600">Data e hora no historico</span>
+                      <p className="text-xs leading-snug text-slate-500">
+                        Fica registada no historico deste Non Stop.
+                      </p>
+                    </div>
+                    {hasEventMetadataChanges ? (
+                      <Badge variant="outline" className="h-6 border-orange-200 bg-orange-50 px-2 text-[10px] font-medium text-orange-700">
+                        Por guardar
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      type="date"
+                      value={eventDateInput}
+                      onChange={(event) => setEventDateInput(event.target.value)}
+                      className="h-9 min-w-[145px] flex-1 bg-white text-[12px] font-medium text-slate-900"
+                      title="Dia do Non Stop"
+                    />
+                    <Input
+                      type="time"
+                      value={eventTimeInput}
+                      onChange={(event) => setEventTimeInput(event.target.value)}
+                      className="h-9 w-[105px] bg-white text-[12px] font-medium text-slate-900"
+                      title="Hora do Non Stop"
+                    />
+                    <Button
+                      size="sm"
+                      className="h-9 gap-1.5 bg-orange-600 px-3 text-[11px] font-semibold text-white hover:bg-orange-500"
+                      disabled={
+                        updateEventMetadataMutation.isPending ||
+                        !eventDateInput ||
+                        !eventTimeInput ||
+                        !hasEventMetadataChanges
+                      }
+                      onClick={() => {
+                        void saveEventMetadata();
+                      }}
+                      title="Guardar data e hora"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Guardar
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
               <TeamForm
                 players={availablePlayers}
                 teams={teams || []}
-                onSubmit={(data) => createTeamMutation.mutate(data)}
+                onSubmit={async (data) => {
+                  if (hasEventMetadataChanges) {
+                    try {
+                      await saveEventMetadata();
+                    } catch {
+                      return;
+                    }
+                  }
+                  createTeamMutation.mutate(data);
+                }}
                 key={teams?.length || 0}
               />
             </DialogContent>
@@ -2138,6 +2176,7 @@ export default function Nonstop() {
               </div>
             </DialogContent>
             </Dialog>
+          </div>
           </div>
         </div>
       </div>

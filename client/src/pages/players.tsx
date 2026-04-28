@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery, useMutation } from "@tanstack/react-query";
-import { type Player, type Settings, insertPlayerSchema, type MessageRequest, type WhatsappSendResponse } from "@shared/schema";
+import { type Player, type Settings, insertPlayerSchema, type MessageRequest, type WhatsappSendResponse, type WhatsappStatusResponse } from "@shared/schema";
 import { api, buildUrl } from "@shared/routes";
 import {
   Table,
@@ -112,6 +112,9 @@ export default function Players() {
   const { data: settings } = useQuery<Settings>({
     queryKey: ["/api/settings"],
   });
+  const { data: whatsappStatus } = useQuery<WhatsappStatusResponse>({
+    queryKey: [api.whatsapp.status.path],
+  });
 
   const availableProfileOptions = (() => {
     const parsed = parseArrayField(settings?.playerProfileOptions);
@@ -124,6 +127,14 @@ export default function Players() {
     : profileTagFilter.length === 1
       ? profileTagFilter[0]
       : `${profileTagFilter.length} perfis`;
+  const activeWhatsappMode = sendResult?.mode ?? whatsappStatus?.mode;
+  const isManualWhatsappMode = activeWhatsappMode === "manual";
+  const whatsappActionLabel = isManualWhatsappMode
+    ? `Preparar WhatsApp manual (${selectedIds.length})`
+    : activeWhatsappMode === "mock"
+      ? `Simular envio (${selectedIds.length})`
+      : `Enviar automaticamente (${selectedIds.length})`;
+  const whatsappPendingLabel = isManualWhatsappMode ? "A preparar..." : "A enviar...";
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -626,10 +637,10 @@ export default function Players() {
                   {sendWhatsappMutation.isPending ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      A enviar...
+                      {whatsappPendingLabel}
                     </>
                   ) : (
-                    <>Enviar automaticamente ({selectedIds.length})</>
+                    <>{whatsappActionLabel}</>
                   )}
                 </Button>
 
@@ -640,14 +651,13 @@ export default function Players() {
                         {sendResult.mode === "mock"
                           ? "Mock local"
                           : sendResult.mode === "manual"
-                            ? "Manual"
+                            ? "Links WhatsApp"
                             : "Evolution API"}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        {sendResult.sent} OK
-                        {sendResult.manual > 0 ? ` / ${sendResult.manual} manuais` : ""}
-                        {" / "}
-                        {sendResult.failed} falhas / {sendResult.skipped} ignoradas
+                        {sendResult.mode === "manual"
+                          ? `${sendResult.manual} link(s) pronto(s)`
+                          : `${sendResult.sent} OK / ${sendResult.failed} falhas / ${sendResult.skipped} ignoradas`}
                       </span>
                     </div>
                     <div className="mt-3 max-h-36 space-y-2 overflow-y-auto">
@@ -666,7 +676,11 @@ export default function Players() {
                                   : "secondary"
                             }
                           >
-                            {result.status === "mock_sent" ? "mock" : result.status}
+                            {result.status === "mock_sent"
+                              ? "mock"
+                              : result.status === "manual"
+                                ? "link"
+                                : result.status}
                           </Badge>
                           {sendResult.results.length > 1 && (result.status === "manual" || result.status === "failed") && result.fallbackUrl && (
                             <Button
@@ -689,7 +703,7 @@ export default function Players() {
                         onClick={() => window.open(sendResult.fallbackUrl, "_blank")}
                       >
                         <ExternalLink className="w-4 h-4" />
-                        Abrir WhatsApp manual
+                        Abrir WhatsApp
                       </Button>
                     )}
                   </div>

@@ -1762,7 +1762,7 @@ export default function Nonstop() {
             ) : null}
           </div>
           <Card className={cn(
-            "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[420px]",
+            "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[420px] sm:ml-auto",
             isPresentationMode && "gap-2 px-3 py-1.5 sm:min-w-[360px] max-[900px]:gap-1.5 max-[900px]:px-2.5 max-[900px]:py-1",
             isActive ? "bg-orange-950 border-orange-500" : "bg-slate-900 border-slate-800"
           )}>

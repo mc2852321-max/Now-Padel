@@ -10,7 +10,7 @@ import { Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Eye, EyeOff, Re
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Settings as SettingsType, AuthorizedUser, WhatsappStatusResponse } from "@shared/schema";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -741,16 +741,11 @@ export default function Settings() {
   }, [settings, form]);
 
   const [activeTab, setActiveTab] = useState("nonstop");
-  const [confirmDeleteCategoriesOpen, setConfirmDeleteCategoriesOpen] = useState(false);
-  const [pendingSettingsSave, setPendingSettingsSave] = useState<any | null>(null);
-  const [categoriesPendingDelete, setCategoriesPendingDelete] = useState<string[]>([]);
+  const [confirmDeleteCategoryOpen, setConfirmDeleteCategoryOpen] = useState(false);
+  const [categoryPendingDelete, setCategoryPendingDelete] = useState<{ index: number; name: string } | null>(null);
   const [rankingCategoriesDraft, setRankingCategoriesDraft] = useState<string[]>(["Non Stop"]);
   const [isAddCategoryDialogOpen, setIsAddCategoryDialogOpen] = useState(false);
   const [newRankingCategoryName, setNewRankingCategoryName] = useState("");
-  const currentNonstopCategories = useMemo(
-    () => parseLineListSetting(settings?.nonstopCategories, ["Non Stop"]),
-    [settings?.nonstopCategories],
-  );
 
   const sanitizeRankingCategoryName = (value: string) => value.trim().replace(/\s+/g, " ");
 
@@ -782,12 +777,23 @@ export default function Settings() {
     setIsAddCategoryDialogOpen(false);
   };
 
-  const removeRankingCategoryAt = (index: number) => {
+  const requestRemoveRankingCategoryAt = (index: number) => {
+    if (rankingCategoriesDraft.length <= 1) return;
+    const category = rankingCategoriesDraft[index];
+    if (!category) return;
+    setCategoryPendingDelete({ index, name: category });
+    setConfirmDeleteCategoryOpen(true);
+  };
+
+  const confirmRemoveRankingCategory = () => {
+    if (!categoryPendingDelete) return;
     setRankingCategoriesDraft((current) => {
       if (current.length <= 1) return current;
-      const next = current.filter((_, itemIndex) => itemIndex !== index);
+      const next = current.filter((_, itemIndex) => itemIndex !== categoryPendingDelete.index);
       return next.length > 0 ? next : ["Non Stop"];
     });
+    setCategoryPendingDelete(null);
+    setConfirmDeleteCategoryOpen(false);
   };
 
   const mutation = useMutation({
@@ -810,9 +816,6 @@ export default function Settings() {
       queryClient.invalidateQueries({
         predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/nonstop/events"),
       });
-      setPendingSettingsSave(null);
-      setCategoriesPendingDelete([]);
-      setConfirmDeleteCategoriesOpen(false);
       toast({ title: "Definições guardadas", description: "As alterações foram aplicadas com sucesso." });
     }
   });
@@ -837,15 +840,6 @@ export default function Settings() {
       ...data,
       nonstopCategories: nextCategories.join("\n"),
     };
-    const removedCategories = currentNonstopCategories.filter((category) => !nextCategories.includes(category));
-
-    if (removedCategories.length > 0 && !confirmDeleteCategoriesOpen) {
-      setPendingSettingsSave(payload);
-      setCategoriesPendingDelete(removedCategories);
-      setConfirmDeleteCategoriesOpen(true);
-      return;
-    }
-
     mutation.mutate(payload);
   };
 
@@ -1222,7 +1216,7 @@ export default function Settings() {
                           variant="outline"
                           size="icon"
                           className="h-8 w-8 shrink-0"
-                          onClick={() => removeRankingCategoryAt(index)}
+                          onClick={() => requestRemoveRankingCategoryAt(index)}
                           disabled={rankingCategoriesDraft.length <= 1}
                           title={rankingCategoriesDraft.length <= 1
                             ? "Tem de existir pelo menos uma categoria."
@@ -1497,36 +1491,34 @@ export default function Settings() {
                   Guardar Alterações
                 </Button>
               </div>
-              <AlertDialog open={confirmDeleteCategoriesOpen} onOpenChange={setConfirmDeleteCategoriesOpen}>
+              <AlertDialog
+                open={confirmDeleteCategoryOpen}
+                onOpenChange={(open) => {
+                  setConfirmDeleteCategoryOpen(open);
+                  if (!open) setCategoryPendingDelete(null);
+                }}
+              >
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Eliminar este evento/categoria?</AlertDialogTitle>
+                    <AlertDialogTitle>Eliminar esta categoria?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Ao eliminar {categoriesPendingDelete.length > 1 ? "estes eventos/categorias" : "este evento/categoria"}, todos os pontos associados aos jogadores nessas categorias serão removidos.
+                      Ao eliminar esta categoria, todos os pontos associados aos jogadores nesta categoria serão removidos quando guardares as alterações.
                     </AlertDialogDescription>
-                    {categoriesPendingDelete.length > 0 ? (
+                    {categoryPendingDelete ? (
                       <p className="text-sm text-muted-foreground">
-                        {categoriesPendingDelete.join(", ")}
+                        {categoryPendingDelete.name}
                       </p>
                     ) : null}
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel
-                      onClick={() => {
-                        setPendingSettingsSave(null);
-                        setCategoriesPendingDelete([]);
-                      }}
-                    >
+                    <AlertDialogCancel onClick={() => setCategoryPendingDelete(null)}>
                       Cancelar
                     </AlertDialogCancel>
                     <AlertDialogAction
                       className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      onClick={() => {
-                        if (!pendingSettingsSave) return;
-                        mutation.mutate(pendingSettingsSave);
-                      }}
+                      onClick={confirmRemoveRankingCategory}
                     >
-                      Sim, eliminar e guardar
+                      Confirmar eliminação
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>

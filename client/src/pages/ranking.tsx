@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Info, Trophy, Upload } from "lucide-react";
+import { History, Info, Trophy, Upload } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,7 +36,10 @@ type RankingRuleFormat = {
 
 type RankingResponse = {
   season: number;
+  category: string;
+  scope?: "category" | "all";
   availableSeasons: number[];
+  availableCategories: string[];
   page: number;
   pageSize: number;
   total: number;
@@ -53,6 +56,32 @@ type RankingResponse = {
   items: RankingItem[];
 };
 
+type RankingHistoryItem = {
+  season: number;
+  totalPlayers: number;
+  totalPoints: number;
+  importedPoints: number;
+  lastEntryAt: string | null;
+  topPlayers: Array<{
+    position: number;
+    playerId: number;
+    name: string;
+    level: string;
+    totalPoints: number;
+  }>;
+};
+
+type RankingHistoryResponse = {
+  category: string;
+  scope?: "category" | "all";
+  limitSeasons: number;
+  availableCategories: string[];
+  availableSeasons: number[];
+  items: RankingHistoryItem[];
+};
+
+const ALL_CATEGORIES_VALUE = "__all__";
+
 const formatPoints = (value: number) => (
   Number.isInteger(value)
     ? String(value)
@@ -61,6 +90,19 @@ const formatPoints = (value: number) => (
       maximumFractionDigits: 3,
     })
 );
+
+const formatDateTime = (value: string | null) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleString("pt-PT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
 const formatRuleDetails = (rule: RankingRuleFormat) => {
   if (rule.description.trim()) {
@@ -91,17 +133,24 @@ export default function Ranking() {
   const [playerSearch, setPlayerSearch] = useState("");
   const [importValues, setImportValues] = useState<Record<number, string>>({});
   const [selectedSeason, setSelectedSeason] = useState<number | undefined>(undefined);
+  const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
   const [showZeroPlayers, setShowZeroPlayers] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const lastPlayersErrorToastRef = useRef<{ message: string; at: number } | null>(null);
+  const isGeneralCategorySelected = selectedCategory === ALL_CATEGORIES_VALUE;
 
   const { data: ranking, isLoading: isRankingLoading } = useQuery<RankingResponse>({
-    queryKey: ["/api/ranking", { season: selectedSeason ?? "current", showZeroPlayers, page, pageSize }],
+    queryKey: ["/api/ranking", { season: selectedSeason ?? "current", category: selectedCategory ?? "current", showZeroPlayers, page, pageSize }],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (typeof selectedSeason === "number") {
         params.set("season", String(selectedSeason));
+      }
+      if (isGeneralCategorySelected) {
+        params.set("scope", "all");
+      } else if (selectedCategory) {
+        params.set("category", selectedCategory);
       }
       params.set("onlyWithPoints", showZeroPlayers ? "0" : "1");
       params.set("page", String(page));
@@ -114,6 +163,29 @@ export default function Ranking() {
       return res.json();
     },
     refetchInterval: 3000,
+    refetchOnWindowFocus: true,
+  });
+  const rankingHistoryCategory = isGeneralCategorySelected
+    ? ALL_CATEGORIES_VALUE
+    : (selectedCategory ?? ranking?.category);
+  const { data: rankingHistory, isLoading: isRankingHistoryLoading } = useQuery<RankingHistoryResponse>({
+    queryKey: ["/api/ranking/history", { category: rankingHistoryCategory ?? "all", limitSeasons: 2 }],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set("limitSeasons", "2");
+      if (rankingHistoryCategory === ALL_CATEGORIES_VALUE) {
+        params.set("scope", "all");
+      } else if (rankingHistoryCategory) {
+        params.set("category", rankingHistoryCategory);
+      }
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`/api/ranking/history${suffix}`, { credentials: "include" });
+      if (!res.ok) {
+        throw new Error("Não foi possível carregar o histórico do ranking.");
+      }
+      return res.json();
+    },
+    refetchInterval: 5000,
     refetchOnWindowFocus: true,
   });
 
@@ -145,7 +217,7 @@ export default function Ranking() {
 
   useEffect(() => {
     setPage(1);
-  }, [selectedSeason, showZeroPlayers]);
+  }, [selectedSeason, selectedCategory, showZeroPlayers]);
 
   useEffect(() => {
     if (ranking && ranking.page !== page) {
@@ -166,12 +238,13 @@ export default function Ranking() {
   );
 
   const importMutation = useMutation({
-    mutationFn: async (payload: { batchLabel?: string; seasonYear?: number; rows: Array<{ playerId: number; points: number }> }) => {
+    mutationFn: async (payload: { batchLabel?: string; seasonYear?: number; category?: string; rows: Array<{ playerId: number; points: number }> }) => {
       const res = await apiRequest("POST", "/api/ranking/import", payload);
       return res.json() as Promise<{ inserted: number }>;
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/ranking"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ranking/history"] });
       setIsImportDialogOpen(false);
       setImportValues({});
       setBatchLabel("");
@@ -191,6 +264,14 @@ export default function Ranking() {
   });
 
   const handleImport = () => {
+    if (isGeneralCategorySelected) {
+      toast({
+        title: "Seleciona uma categoria",
+        description: "Para importar pontos iniciais, escolhe primeiro uma categoria específica.",
+      });
+      return;
+    }
+
     const rows = Object.entries(importValues)
       .map(([playerId, value]) => ({
         playerId: Number(playerId),
@@ -210,6 +291,9 @@ export default function Ranking() {
     importMutation.mutate({
       batchLabel: batchLabel.trim() || undefined,
       seasonYear: selectedSeason ?? ranking?.season,
+      category: selectedCategory && selectedCategory !== ALL_CATEGORIES_VALUE
+        ? selectedCategory
+        : ranking?.category,
       rows,
     });
   };
@@ -222,6 +306,9 @@ export default function Ranking() {
   const rankingPageSize = ranking?.pageSize ?? pageSize;
   const showingFrom = rankingTotal === 0 ? 0 : ((rankingPage - 1) * rankingPageSize) + 1;
   const showingTo = rankingTotal === 0 ? 0 : Math.min(rankingPage * rankingPageSize, rankingTotal);
+  const categoryLabel = isGeneralCategorySelected
+    ? "Geral (todas as categorias)"
+    : (ranking?.category ?? "-");
 
   return (
     <div className="space-y-6">
@@ -263,7 +350,7 @@ export default function Ranking() {
             </Tooltip>
           </div>
           <p className="text-sm text-muted-foreground">
-            Temporada {ranking?.season ?? "-"}: consulte as regras no ícone de informação.
+            Temporada {ranking?.season ?? "-"} · Categoria {categoryLabel}: consulte as regras no ícone de informação.
           </p>
           {playersErrorMessage && (
             <p className="text-sm text-red-600">
@@ -289,6 +376,23 @@ export default function Ranking() {
               ))}
             </SelectContent>
           </Select>
+          <Select
+            value={String(selectedCategory ?? ranking?.category ?? "")}
+            onValueChange={(value) => setSelectedCategory(value)}
+            disabled={!ranking}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Categoria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_CATEGORIES_VALUE}>Geral (todas as categorias)</SelectItem>
+              {(ranking?.availableCategories ?? []).map((category) => (
+                <SelectItem key={`category-option-${category}`} value={category}>
+                  {category}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <div className="flex items-center gap-2 rounded-md border px-3 py-2">
             <Switch
               id="ranking-show-zero"
@@ -302,7 +406,11 @@ export default function Ranking() {
 
           <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="gap-2 bg-orange-600 text-white hover:bg-orange-500">
+              <Button
+                className="gap-2 bg-orange-600 text-white hover:bg-orange-500"
+                disabled={isGeneralCategorySelected}
+                title={isGeneralCategorySelected ? "Escolhe uma categoria específica para importar pontos." : undefined}
+              >
                 <Upload className="w-4 h-4" />
                 Importar Pontos Iniciais
               </Button>
@@ -413,6 +521,75 @@ export default function Ranking() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <History className="w-4 h-4 text-orange-600" />
+            Histórico das últimas 2 temporadas
+          </CardTitle>
+          <CardDescription>
+            Consulta rápida por temporada na categoria {rankingHistory?.category ?? ranking?.category ?? "-"}.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isRankingHistoryLoading ? (
+            <p className="text-sm text-muted-foreground">A carregar histórico...</p>
+          ) : (rankingHistory?.items.length ?? 0) === 0 ? (
+            <p className="text-sm text-muted-foreground">Ainda não existem temporadas para mostrar.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {(rankingHistory?.items ?? []).map((seasonRow) => (
+                <div key={`history-season-${seasonRow.season}`} className="space-y-3 rounded-md border p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold">Temporada {seasonRow.season}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Atualizado: {formatDateTime(seasonRow.lastEntryAt)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setSelectedSeason(seasonRow.season)}
+                    >
+                      Ver temporada
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Jogadores</p>
+                      <p className="font-semibold">{seasonRow.totalPlayers}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Pontos</p>
+                      <p className="font-semibold">{formatPoints(seasonRow.totalPoints)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Base</p>
+                      <p className="font-semibold">{formatPoints(seasonRow.importedPoints)}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Top 3</p>
+                    {seasonRow.topPlayers.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Sem pontuação nesta temporada.</p>
+                    ) : (
+                      seasonRow.topPlayers.map((player) => (
+                        <div key={`history-top-${seasonRow.season}-${player.playerId}`} className="flex items-center justify-between text-sm">
+                          <span>{player.position}. {player.name}</span>
+                          <span className="font-semibold">{formatPoints(player.totalPoints)}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

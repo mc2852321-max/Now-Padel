@@ -88,7 +88,7 @@ export type PlayersPage = {
 
 export type NonstopEventSummary = Pick<
   NonstopEvent,
-  "id" | "status" | "label" | "createdAt" | "startedAt" | "completedAt"
+  "id" | "status" | "label" | "category" | "createdAt" | "startedAt" | "completedAt"
 >;
 
 export type NonstopEventDetails = {
@@ -110,6 +110,23 @@ export type RankingLeaderboardRow = {
   lastEntryAt: Date | null;
 };
 
+export type RankingHistoryTopPlayer = {
+  position: number;
+  playerId: number;
+  name: string;
+  level: string;
+  totalPoints: number;
+};
+
+export type RankingSeasonHistoryRow = {
+  season: number;
+  totalPlayers: number;
+  totalPoints: number;
+  importedPoints: number;
+  lastEntryAt: Date | null;
+  topPlayers: RankingHistoryTopPlayer[];
+};
+
 export type RankingImportRow = {
   playerId: number;
   points: number;
@@ -128,8 +145,9 @@ export interface IStorage {
   getCurrentNonstopEvent(): Promise<NonstopEvent>;
   listNonstopEvents(filters?: { from?: Date; to?: Date }): Promise<NonstopEventSummary[]>;
   getNonstopEventById(id: number): Promise<NonstopEvent | null>;
-  updateNonstopEventMetadata(id: number, update: { label?: string | null; startedAt?: Date | null }): Promise<NonstopEvent | null>;
+  updateNonstopEventMetadata(id: number, update: { label?: string | null; startedAt?: Date | null; category?: string | null }): Promise<NonstopEvent | null>;
   getNonstopEventDetails(id: number): Promise<NonstopEventDetails | null>;
+  deleteNonstopEvent(id: number): Promise<{ deletedEventId: number; deletedRankingEntries: number }>;
   finalizeAndStartNonstop(opts?: { label?: string; userEmail?: string | null }): Promise<{ completedEventId: number; newEvent: NonstopEvent }>;
   purgeOldNonstopEvents(retentionDays?: number): Promise<number>;
 
@@ -152,10 +170,12 @@ export interface IStorage {
   resetNonstop(): Promise<void>;
 
   // Ranking
-  getRankingLeaderboard(seasonYear?: number): Promise<RankingLeaderboardRow[]>;
-  getRankingEntries(playerId?: number, seasonYear?: number): Promise<RankingEntry[]>;
+  getRankingLeaderboard(seasonYear?: number, category?: string): Promise<RankingLeaderboardRow[]>;
+  getRankingEntries(playerId?: number, seasonYear?: number, category?: string): Promise<RankingEntry[]>;
   getRankingSeasons(): Promise<number[]>;
-  importRankingBasePoints(rows: RankingImportRow[], opts?: { batchLabel?: string; seasonYear?: number; userEmail?: string | null }): Promise<number>;
+  getRankingCategories(): Promise<string[]>;
+  getRankingHistory(opts?: { category?: string; limitSeasons?: number }): Promise<RankingSeasonHistoryRow[]>;
+  importRankingBasePoints(rows: RankingImportRow[], opts?: { batchLabel?: string; seasonYear?: number; category?: string; userEmail?: string | null }): Promise<number>;
 
   // Authorized Users
   getAuthorizedUsers(): Promise<AuthorizedUser[]>;
@@ -251,6 +271,9 @@ function computeStandings(
 const RANKING_PARTICIPATION_POINTS = 2;
 const RANKING_MAX_WIN_POINTS_PER_EVENT = 15;
 const RANKING_DEFAULT_ROUND_WIN_POINTS = 3;
+const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
+const RANKING_HISTORY_SEASONS_TO_KEEP = 2;
+const RANKING_ALL_CATEGORIES_TOKEN = "__all__";
 
 export class DatabaseStorage implements IStorage {
   private normalizeRankingPoints(value: number): number {
@@ -293,11 +316,75 @@ export class DatabaseStorage implements IStorage {
     return this.getLisbonYear(new Date());
   }
 
+  private async pruneOldRankingSeasons(
+    seasonsToKeep = RANKING_HISTORY_SEASONS_TO_KEEP,
+    executor: DbExecutor = db,
+  ): Promise<number> {
+    const safeSeasonsToKeep = Number.isFinite(seasonsToKeep)
+      ? Math.max(1, Math.trunc(Number(seasonsToKeep)))
+      : RANKING_HISTORY_SEASONS_TO_KEEP;
+    const oldestSeasonToKeep = this.getCurrentSeasonYear() - (safeSeasonsToKeep - 1);
+    const deleted = await executor
+      .delete(rankingEntries)
+      .where(sql`${rankingEntries.seasonYear} < ${oldestSeasonToKeep}`)
+      .returning({ id: rankingEntries.id });
+    return deleted.length;
+  }
+
   private resolveSeasonYearInput(seasonYear?: number): number {
     if (typeof seasonYear === "number" && Number.isInteger(seasonYear) && seasonYear >= 2000 && seasonYear <= 3000) {
       return seasonYear;
     }
     return this.getCurrentSeasonYear();
+  }
+
+  private isAllCategoriesSelection(value: unknown): boolean {
+    return typeof value === "string" && value.trim().toLowerCase() === RANKING_ALL_CATEGORIES_TOKEN;
+  }
+
+  private normalizeNonstopCategory(value: unknown, fallback = DEFAULT_NONSTOP_CATEGORY): string {
+    const cleaned = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+    if (!cleaned) return fallback;
+    if (cleaned.length <= 60) return cleaned;
+    return cleaned.slice(0, 60).trim() || fallback;
+  }
+
+  private parseNonstopCategories(raw: unknown): string[] {
+    if (typeof raw !== "string" || !raw.trim()) {
+      return [DEFAULT_NONSTOP_CATEGORY];
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [DEFAULT_NONSTOP_CATEGORY];
+    }
+
+    if (!Array.isArray(parsed)) {
+      return [DEFAULT_NONSTOP_CATEGORY];
+    }
+
+    const unique = new Set<string>();
+    for (const item of parsed) {
+      const category = this.normalizeNonstopCategory(item, "");
+      if (!category) continue;
+      unique.add(category);
+    }
+
+    if (unique.size === 0) {
+      return [DEFAULT_NONSTOP_CATEGORY];
+    }
+
+    return Array.from(unique);
+  }
+
+  private serializeNonstopCategories(raw: unknown): string {
+    return JSON.stringify(this.parseNonstopCategories(raw));
+  }
+
+  private categoryKey(category: string): string {
+    return encodeURIComponent(this.normalizeNonstopCategory(category));
   }
 
   private getSeasonYearFromEvent(event: Pick<NonstopEvent, "startedAt" | "createdAt">): number {
@@ -378,11 +465,14 @@ export class DatabaseStorage implements IStorage {
   private async awardRankingForCompletedEvent(
     eventId: number,
     seasonYear: number,
+    category: string,
     eventTeams: Team[],
     eventResults: NonstopResult[],
     opts: { nonstopCourts?: number | null; nonstopRounds?: number | null },
     executor: DbExecutor = db,
   ): Promise<void> {
+    const normalizedCategory = this.normalizeNonstopCategory(category);
+    const categoryKey = this.categoryKey(normalizedCategory);
     const teamPlayers = new Map<number, number[]>();
     const participatingPlayers = new Set<number>();
 
@@ -399,11 +489,12 @@ export class DatabaseStorage implements IStorage {
         {
           playerId,
           seasonYear,
+          category: normalizedCategory,
           eventId,
           round: null,
           points: RANKING_PARTICIPATION_POINTS,
           reason: "participation",
-          reasonKey: `nonstop:${eventId}:participation:player:${playerId}`,
+          reasonKey: `nonstop:${eventId}:cat:${categoryKey}:participation:player:${playerId}`,
           note: "Participação no Non Stop",
         },
         executor,
@@ -428,11 +519,12 @@ export class DatabaseStorage implements IStorage {
           {
             playerId,
             seasonYear,
+            category: normalizedCategory,
             eventId,
             round: result.round,
             points: roundWinPoints,
             reason: "round_win",
-            reasonKey: `nonstop:${eventId}:round:${result.round}:court:${result.court}:win:player:${playerId}`,
+            reasonKey: `nonstop:${eventId}:cat:${categoryKey}:round:${result.round}:court:${result.court}:win:player:${playerId}`,
             note: `Vitória na ronda ${result.round} (+${roundWinPointsLabel})`,
           },
           executor,
@@ -450,10 +542,15 @@ export class DatabaseStorage implements IStorage {
       .limit(1);
 
     if (active[0]) {
-      if (active[0].startedAt) return active[0];
+      const normalizedCategory = this.normalizeNonstopCategory((active[0] as any).category);
+      const hasSameCategory = active[0].category === normalizedCategory;
+      if (active[0].startedAt && hasSameCategory) return active[0];
       const [updated] = await executor
         .update(nonstopEvents)
-        .set({ startedAt: getDefaultNonstopStartedAt() })
+        .set({
+          startedAt: active[0].startedAt ?? getDefaultNonstopStartedAt(),
+          category: normalizedCategory,
+        })
         .where(eq(nonstopEvents.id, active[0].id))
         .returning();
       return updated ?? active[0];
@@ -461,7 +558,11 @@ export class DatabaseStorage implements IStorage {
 
     const [created] = await executor
       .insert(nonstopEvents)
-      .values({ status: "active", startedAt: getDefaultNonstopStartedAt() })
+      .values({
+        status: "active",
+        startedAt: getDefaultNonstopStartedAt(),
+        category: DEFAULT_NONSTOP_CATEGORY,
+      })
       .returning();
 
     await executor.insert(nonstopTimer).values({ eventId: created.id }).onConflictDoNothing();
@@ -553,6 +654,7 @@ export class DatabaseStorage implements IStorage {
       id: row.id,
       status: row.status,
       label: row.label,
+      category: this.normalizeNonstopCategory((row as any).category),
       createdAt: row.createdAt,
       startedAt: row.startedAt,
       completedAt: row.completedAt,
@@ -561,27 +663,50 @@ export class DatabaseStorage implements IStorage {
 
   async getNonstopEventById(id: number): Promise<NonstopEvent | null> {
     const [event] = await db.select().from(nonstopEvents).where(eq(nonstopEvents.id, id));
-    return event ?? null;
+    if (!event) return null;
+    const normalizedCategory = this.normalizeNonstopCategory((event as any).category);
+    if (event.category === normalizedCategory) return event;
+    const [updated] = await db
+      .update(nonstopEvents)
+      .set({ category: normalizedCategory })
+      .where(eq(nonstopEvents.id, id))
+      .returning();
+    return updated ?? { ...event, category: normalizedCategory };
   }
 
   async updateNonstopEventMetadata(
     id: number,
-    update: { label?: string | null; startedAt?: Date | null },
+    update: { label?: string | null; startedAt?: Date | null; category?: string | null },
   ): Promise<NonstopEvent | null> {
-    const values: Partial<Pick<NonstopEvent, "label" | "startedAt">> = {};
+    const values: Partial<Pick<NonstopEvent, "label" | "startedAt" | "category">> = {};
     if ("label" in update) values.label = update.label?.trim() || null;
     if ("startedAt" in update) values.startedAt = update.startedAt ?? null;
+    if ("category" in update && update.category !== undefined) {
+      values.category = this.normalizeNonstopCategory(update.category);
+    }
 
     if (Object.keys(values).length === 0) {
       return this.getNonstopEventById(id);
     }
 
-    const [event] = await db
-      .update(nonstopEvents)
-      .set(values)
-      .where(eq(nonstopEvents.id, id))
-      .returning();
-    return event ?? null;
+    return await db.transaction(async (tx) => {
+      const [event] = await tx
+        .update(nonstopEvents)
+        .set(values)
+        .where(eq(nonstopEvents.id, id))
+        .returning();
+
+      if (!event) return null;
+
+      if (values.category) {
+        await tx
+          .update(rankingEntries)
+          .set({ category: values.category })
+          .where(eq(rankingEntries.eventId, id));
+      }
+
+      return event;
+    });
   }
 
   async getNonstopEventDetails(id: number): Promise<NonstopEventDetails | null> {
@@ -618,6 +743,49 @@ export class DatabaseStorage implements IStorage {
     return { event, teams: eventTeams, results: eventResults, timer: eventTimer, snapshot };
   }
 
+  async deleteNonstopEvent(id: number): Promise<{ deletedEventId: number; deletedRankingEntries: number }> {
+    return await db.transaction(async (tx) => {
+      const [existingEvent] = await tx
+        .select({
+          id: nonstopEvents.id,
+          status: nonstopEvents.status,
+        })
+        .from(nonstopEvents)
+        .where(eq(nonstopEvents.id, id))
+        .limit(1);
+
+      if (!existingEvent) {
+        throw new Error("EVENT_NOT_FOUND");
+      }
+
+      if (existingEvent.status === "active") {
+        throw new Error("ACTIVE_EVENT_DELETE_NOT_ALLOWED");
+      }
+
+      const deletedRankingEntries = await tx
+        .delete(rankingEntries)
+        .where(eq(rankingEntries.eventId, id))
+        .returning({ id: rankingEntries.id });
+
+      await tx.delete(nonstopResults).where(eq(nonstopResults.eventId, id));
+      await tx.delete(teams).where(eq(teams.eventId, id));
+      await tx.delete(nonstopTimer).where(eq(nonstopTimer.eventId, id));
+      const deletedEvents = await tx
+        .delete(nonstopEvents)
+        .where(eq(nonstopEvents.id, id))
+        .returning({ id: nonstopEvents.id });
+
+      if (deletedEvents.length === 0) {
+        throw new Error("EVENT_NOT_FOUND");
+      }
+
+      return {
+        deletedEventId: id,
+        deletedRankingEntries: deletedRankingEntries.length,
+      };
+    });
+  }
+
   async finalizeAndStartNonstop(opts?: { label?: string; userEmail?: string | null }): Promise<{ completedEventId: number; newEvent: NonstopEvent }> {
     const result = await db.transaction(async (tx) => {
       const activeEvent = await this.getOrCreateActiveEvent(tx as unknown as DbExecutor);
@@ -646,9 +814,15 @@ export class DatabaseStorage implements IStorage {
         (appSettings.tieBreaker === "diff" ? "diff" : "direct"),
         appSettings.nonstopRounds ?? 5,
       );
+      const configuredCategories = this.parseNonstopCategories(appSettings.nonstopCategories);
+      const activeCategory = this.normalizeNonstopCategory(activeEvent.category);
+      const eventCategory = configuredCategories.includes(activeCategory)
+        ? activeCategory
+        : configuredCategories[0];
 
       const snapshot = JSON.stringify({
         finalizedAt: new Date().toISOString(),
+        category: eventCategory,
         teams: eventTeams,
         results: eventResults,
         timer: eventTimer,
@@ -667,6 +841,7 @@ export class DatabaseStorage implements IStorage {
       await this.awardRankingForCompletedEvent(
         activeEvent.id,
         seasonYear,
+        eventCategory,
         eventTeams,
         eventResults,
         {
@@ -682,6 +857,7 @@ export class DatabaseStorage implements IStorage {
           status: "completed",
           completedAt: new Date(),
           label: opts?.label ?? activeEvent.label,
+          category: eventCategory,
           finalizedBy: opts?.userEmail ?? null,
           snapshot,
         })
@@ -692,6 +868,7 @@ export class DatabaseStorage implements IStorage {
         .values({
           status: "active",
           startedAt: getDefaultNonstopStartedAt(),
+          category: eventCategory,
           createdBy: opts?.userEmail ?? null,
         })
         .returning();
@@ -700,6 +877,7 @@ export class DatabaseStorage implements IStorage {
       return { completedEventId: activeEvent.id, newEvent };
     });
     await this.purgeOldNonstopEvents(90);
+    await this.pruneOldRankingSeasons();
     return result;
   }
 
@@ -835,16 +1013,59 @@ export class DatabaseStorage implements IStorage {
   async getSettings(): Promise<Settings> {
     const [existing] = await db.select().from(settings);
     if (!existing) {
-      const [created] = await db.insert(settings).values({}).returning();
+      const [created] = await db.insert(settings).values({
+        nonstopCategories: JSON.stringify([DEFAULT_NONSTOP_CATEGORY]),
+      }).returning();
       return created;
     }
-    return existing;
+    const normalizedCategories = this.serializeNonstopCategories((existing as any).nonstopCategories);
+    if (existing.nonstopCategories === normalizedCategories) {
+      return existing;
+    }
+    const [updated] = await db
+      .update(settings)
+      .set({ nonstopCategories: normalizedCategories })
+      .where(eq(settings.id, existing.id))
+      .returning();
+    return updated ?? { ...existing, nonstopCategories: normalizedCategories };
   }
 
   async updateSettings(update: Partial<InsertSettings>): Promise<Settings> {
     const current = await this.getSettings();
-    const [updated] = await db.update(settings).set(update).where(eq(settings.id, current.id)).returning();
-    return updated;
+    const currentCategories = this.parseNonstopCategories(current.nonstopCategories);
+    const normalizedUpdate: Partial<InsertSettings> = { ...update };
+    let nextCategories = currentCategories;
+    if ("nonstopCategories" in normalizedUpdate) {
+      nextCategories = this.parseNonstopCategories(normalizedUpdate.nonstopCategories);
+      normalizedUpdate.nonstopCategories = JSON.stringify(nextCategories);
+    }
+    const removedCategories = currentCategories.filter((category) => !nextCategories.includes(category));
+    const fallbackCategory = nextCategories[0] ?? DEFAULT_NONSTOP_CATEGORY;
+
+    return await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(settings)
+        .set(normalizedUpdate)
+        .where(eq(settings.id, current.id))
+        .returning();
+
+      if (removedCategories.length > 0) {
+        const rankingWhere = removedCategories.length === 1
+          ? eq(rankingEntries.category, removedCategories[0])
+          : inArray(rankingEntries.category, removedCategories);
+        await tx.delete(rankingEntries).where(rankingWhere);
+
+        const eventWhere = removedCategories.length === 1
+          ? eq(nonstopEvents.category, removedCategories[0])
+          : inArray(nonstopEvents.category, removedCategories);
+        await tx
+          .update(nonstopEvents)
+          .set({ category: fallbackCategory })
+          .where(eventWhere);
+      }
+
+      return updated;
+    });
   }
 
   async getNonstopTimer(eventId?: number): Promise<NonstopTimer> {
@@ -880,9 +1101,20 @@ export class DatabaseStorage implements IStorage {
     await this.finalizeAndStartNonstop();
   }
 
-  async getRankingEntries(playerId?: number, seasonYear?: number): Promise<RankingEntry[]> {
+  async getRankingEntries(playerId?: number, seasonYear?: number, category?: string): Promise<RankingEntry[]> {
     const targetSeason = this.resolveSeasonYearInput(seasonYear);
+    const shouldIncludeAllCategories = this.isAllCategoriesSelection(category);
+    let targetCategory = DEFAULT_NONSTOP_CATEGORY;
     const conditions: any[] = [eq(rankingEntries.seasonYear, targetSeason)];
+
+    if (!shouldIncludeAllCategories) {
+      const categories = await this.getRankingCategories();
+      const requestedCategory = this.normalizeNonstopCategory(category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+      targetCategory = categories.includes(requestedCategory)
+        ? requestedCategory
+        : (categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+      conditions.push(eq(rankingEntries.category, targetCategory));
+    }
 
     if (typeof playerId === "number" && playerId > 0) {
       conditions.push(eq(rankingEntries.playerId, playerId));
@@ -896,11 +1128,27 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(rankingEntries.createdAt), desc(rankingEntries.id));
   }
 
-  async getRankingLeaderboard(seasonYear?: number): Promise<RankingLeaderboardRow[]> {
+  async getRankingLeaderboard(seasonYear?: number, category?: string): Promise<RankingLeaderboardRow[]> {
     const targetSeason = this.resolveSeasonYearInput(seasonYear);
+    const shouldIncludeAllCategories = this.isAllCategoriesSelection(category);
+    let targetCategory = DEFAULT_NONSTOP_CATEGORY;
+    let rankingFilter = eq(rankingEntries.seasonYear, targetSeason);
+
+    if (!shouldIncludeAllCategories) {
+      const categories = await this.getRankingCategories();
+      const requestedCategory = this.normalizeNonstopCategory(category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+      targetCategory = categories.includes(requestedCategory)
+        ? requestedCategory
+        : (categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+      rankingFilter = and(
+        eq(rankingEntries.seasonYear, targetSeason),
+        eq(rankingEntries.category, targetCategory),
+      )!;
+    }
+
     const [allPlayers, allEntries] = await Promise.all([
       db.select().from(players),
-      db.select().from(rankingEntries).where(eq(rankingEntries.seasonYear, targetSeason)),
+      db.select().from(rankingEntries).where(rankingFilter),
     ]);
 
     const totalsByPlayer = new Map<number, RankingLeaderboardRow>();
@@ -937,6 +1185,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRankingSeasons(): Promise<number[]> {
+    await this.pruneOldRankingSeasons();
     const currentSeason = this.getCurrentSeasonYear();
     const rows = await db
       .selectDistinct({ seasonYear: rankingEntries.seasonYear })
@@ -955,9 +1204,93 @@ export class DatabaseStorage implements IStorage {
     return Array.from(seasons).sort((a, b) => b - a);
   }
 
+  async getRankingCategories(): Promise<string[]> {
+    const appSettings = await this.getSettings();
+    const configured = this.parseNonstopCategories(appSettings.nonstopCategories);
+    const [entryRows, eventRows] = await Promise.all([
+      db
+        .selectDistinct({ category: rankingEntries.category })
+        .from(rankingEntries)
+        .where(sql`${rankingEntries.category} IS NOT NULL AND BTRIM(${rankingEntries.category}) <> ''`),
+      db
+        .selectDistinct({ category: nonstopEvents.category })
+        .from(nonstopEvents)
+        .where(sql`${nonstopEvents.category} IS NOT NULL AND BTRIM(${nonstopEvents.category}) <> ''`),
+    ]);
+
+    const configuredSet = new Set(configured);
+    const discovered = new Set<string>();
+
+    for (const row of entryRows) {
+      discovered.add(this.normalizeNonstopCategory(row.category));
+    }
+    for (const row of eventRows) {
+      discovered.add(this.normalizeNonstopCategory(row.category));
+    }
+
+    const extras = Array.from(discovered)
+      .filter((category) => !configuredSet.has(category))
+      .sort((a, b) => a.localeCompare(b, "pt-PT", { sensitivity: "base" }));
+
+    return [...configured, ...extras];
+  }
+
+  async getRankingHistory(opts?: { category?: string; limitSeasons?: number }): Promise<RankingSeasonHistoryRow[]> {
+    const categories = await this.getRankingCategories();
+    const shouldIncludeAllCategories = this.isAllCategoriesSelection(opts?.category);
+    let targetCategory = RANKING_ALL_CATEGORIES_TOKEN;
+
+    if (!shouldIncludeAllCategories) {
+      const requestedCategory = this.normalizeNonstopCategory(opts?.category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+      targetCategory = categories.includes(requestedCategory)
+        ? requestedCategory
+        : (categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+    }
+    const limitSeasons = Number.isFinite(opts?.limitSeasons)
+      ? Math.min(5, Math.max(1, Math.trunc(Number(opts?.limitSeasons))))
+      : 2;
+    const seasons = (await this.getRankingSeasons()).slice(0, limitSeasons);
+    const history: RankingSeasonHistoryRow[] = [];
+
+    for (const season of seasons) {
+      const leaderboard = await this.getRankingLeaderboard(season, targetCategory);
+      const rowsWithPoints = leaderboard.filter((row) =>
+        row.totalPoints !== 0 ||
+        row.importedPoints !== 0 ||
+        row.participationCount > 0 ||
+        row.roundWins > 0,
+      );
+
+      let lastEntryAt: Date | null = null;
+      for (const row of rowsWithPoints) {
+        if (!row.lastEntryAt) continue;
+        if (!lastEntryAt || row.lastEntryAt > lastEntryAt) {
+          lastEntryAt = row.lastEntryAt;
+        }
+      }
+
+      history.push({
+        season,
+        totalPlayers: rowsWithPoints.length,
+        totalPoints: rowsWithPoints.reduce((sum, row) => sum + row.totalPoints, 0),
+        importedPoints: rowsWithPoints.reduce((sum, row) => sum + row.importedPoints, 0),
+        lastEntryAt,
+        topPlayers: rowsWithPoints.slice(0, 3).map((row, index) => ({
+          position: index + 1,
+          playerId: row.playerId,
+          name: row.name,
+          level: row.level,
+          totalPoints: row.totalPoints,
+        })),
+      });
+    }
+
+    return history;
+  }
+
   async importRankingBasePoints(
     rows: RankingImportRow[],
-    opts?: { batchLabel?: string; seasonYear?: number; userEmail?: string | null },
+    opts?: { batchLabel?: string; seasonYear?: number; category?: string; userEmail?: string | null },
   ): Promise<number> {
     const cleanRows = rows
       .filter((row) => Number.isInteger(row.playerId) && row.playerId > 0)
@@ -972,6 +1305,12 @@ export class DatabaseStorage implements IStorage {
 
     const batchLabel = (opts?.batchLabel ?? "").trim() || new Date().toISOString();
     const seasonYear = this.resolveSeasonYearInput(opts?.seasonYear);
+    const categories = await this.getRankingCategories();
+    const requestedCategory = this.normalizeNonstopCategory(opts?.category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+    const category = categories.includes(requestedCategory)
+      ? requestedCategory
+      : (categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+    const categoryKey = this.categoryKey(category);
     const userEmail = (opts?.userEmail ?? "").trim();
 
     let inserted = 0;
@@ -981,11 +1320,12 @@ export class DatabaseStorage implements IStorage {
           {
             playerId: row.playerId,
             seasonYear,
+            category,
             eventId: null,
             round: null,
             points: row.points,
             reason: "import",
-            reasonKey: `import:${seasonYear}:${batchLabel}:player:${row.playerId}`,
+            reasonKey: `import:${seasonYear}:cat:${categoryKey}:${batchLabel}:player:${row.playerId}`,
             note: row.note || (userEmail ? `Importado por ${userEmail}` : "Importacao de pontuacao inicial"),
           },
           tx as unknown as DbExecutor,

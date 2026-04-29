@@ -16,7 +16,17 @@ import type {
   Team,
   UpdatePlayerRequest,
 } from "../shared/schema.js";
-import type { IStorage, NonstopEventDetails, NonstopEventSummary, PlayersPage, RankingImportRow, RankingLeaderboardRow } from "./storage.js";
+import type {
+  IStorage,
+  NonstopEventDetails,
+  NonstopEventSummary,
+  PlayersPage,
+  RankingImportRow,
+  RankingLeaderboardRow,
+  RankingSeasonHistoryRow,
+} from "./storage.js";
+
+const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
 
 type BootstrapAuthUserLike = {
   email: string;
@@ -70,6 +80,7 @@ export class LocalStorage implements IStorage {
     id: 1,
     status: "active",
     label: "Local",
+    category: DEFAULT_NONSTOP_CATEGORY,
     createdAt: new Date(),
     startedAt: new Date(),
     completedAt: null,
@@ -110,6 +121,7 @@ export class LocalStorage implements IStorage {
     soundDurationSeconds: 5,
     tieBreaker: "direct",
     playerProfileOptions: "[\"Academia\",\"Fecha jogos\",\"Non Stop\"]",
+    nonstopCategories: "[\"Non Stop\"]",
   };
 
   constructor() {
@@ -201,9 +213,14 @@ export class LocalStorage implements IStorage {
     return id === this.event.id ? this.event : null;
   }
 
-  async updateNonstopEventMetadata(id: number, update: { label?: string | null; startedAt?: Date | null }): Promise<NonstopEvent | null> {
+  async updateNonstopEventMetadata(id: number, update: { label?: string | null; startedAt?: Date | null; category?: string | null }): Promise<NonstopEvent | null> {
     if (id !== this.event.id) return null;
-    this.event = { ...this.event, label: update.label ?? this.event.label, startedAt: update.startedAt ?? this.event.startedAt };
+    this.event = {
+      ...this.event,
+      label: update.label ?? this.event.label,
+      startedAt: update.startedAt ?? this.event.startedAt,
+      category: update.category?.trim() || this.event.category || DEFAULT_NONSTOP_CATEGORY,
+    };
     return this.event;
   }
 
@@ -218,12 +235,24 @@ export class LocalStorage implements IStorage {
     };
   }
 
+  async deleteNonstopEvent(id: number): Promise<{ deletedEventId: number; deletedRankingEntries: number }> {
+    if (id !== this.event.id) {
+      throw new Error("EVENT_NOT_FOUND");
+    }
+    if (this.event.status === "active") {
+      throw new Error("ACTIVE_EVENT_DELETE_NOT_ALLOWED");
+    }
+    throw new Error("EVENT_NOT_FOUND");
+  }
+
   async finalizeAndStartNonstop(opts?: { label?: string; userEmail?: string | null }): Promise<{ completedEventId: number; newEvent: NonstopEvent }> {
     const completedEventId = this.event.id;
+    const category = this.event.category || DEFAULT_NONSTOP_CATEGORY;
     this.event = {
       id: this.nextEventId++,
       status: "active",
       label: opts?.label ?? "Local",
+      category,
       createdAt: new Date(),
       startedAt: new Date(),
       completedAt: null,
@@ -328,11 +357,11 @@ export class LocalStorage implements IStorage {
     this.timer = { ...this.timer, timerState: "idle", isActive: 0, round: 1, timeLeft: 0, phaseEndsAt: null, updatedAt: new Date() };
   }
 
-  async getRankingLeaderboard(): Promise<RankingLeaderboardRow[]> {
+  async getRankingLeaderboard(_seasonYear?: number, _category?: string): Promise<RankingLeaderboardRow[]> {
     return [];
   }
 
-  async getRankingEntries(): Promise<RankingEntry[]> {
+  async getRankingEntries(_playerId?: number, _seasonYear?: number, _category?: string): Promise<RankingEntry[]> {
     return [];
   }
 
@@ -340,7 +369,37 @@ export class LocalStorage implements IStorage {
     return [getLisbonYear()];
   }
 
-  async importRankingBasePoints(_rows: RankingImportRow[]): Promise<number> {
+  async getRankingCategories(): Promise<string[]> {
+    try {
+      const parsed = JSON.parse(this.settings.nonstopCategories);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed
+          .map((value) => (typeof value === "string" ? value.trim() : ""))
+          .filter(Boolean);
+      }
+    } catch {
+      // ignore invalid json in local mode
+    }
+    return [DEFAULT_NONSTOP_CATEGORY];
+  }
+
+  async getRankingHistory(opts?: { category?: string; limitSeasons?: number }): Promise<RankingSeasonHistoryRow[]> {
+    const seasons = await this.getRankingSeasons();
+    const limitSeasons = Number.isFinite(opts?.limitSeasons)
+      ? Math.min(5, Math.max(1, Math.trunc(Number(opts?.limitSeasons))))
+      : 2;
+
+    return seasons.slice(0, limitSeasons).map((season) => ({
+      season,
+      totalPlayers: 0,
+      totalPoints: 0,
+      importedPoints: 0,
+      lastEntryAt: null,
+      topPlayers: [],
+    }));
+  }
+
+  async importRankingBasePoints(_rows: RankingImportRow[], _opts?: { batchLabel?: string; seasonYear?: number; category?: string; userEmail?: string | null }): Promise<number> {
     return 0;
   }
 

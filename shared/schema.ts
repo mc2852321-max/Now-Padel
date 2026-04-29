@@ -6,6 +6,7 @@ export const nonstopEvents = pgTable("nonstop_events", {
   id: serial("id").primaryKey(),
   status: text("status").notNull().default("active"),
   label: text("label"),
+  category: text("category").notNull().default("Non Stop"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
@@ -77,12 +78,14 @@ export const settings = pgTable("settings", {
   soundDurationSeconds: integer("sound_duration_seconds").notNull().default(5),
   tieBreaker: text("tie_breaker").notNull().default("direct"), // "direct" or "diff"
   playerProfileOptions: text("player_profile_options").notNull().default("[\"Academia\",\"Fecha jogos\",\"Non Stop\"]"),
+  nonstopCategories: text("nonstop_categories").notNull().default("[\"Non Stop\"]"),
 });
 
 export const rankingEntries = pgTable("ranking_entries", {
   id: serial("id").primaryKey(),
   playerId: integer("player_id").notNull(),
   seasonYear: integer("season_year").notNull(),
+  category: text("category").notNull().default("Non Stop"),
   eventId: integer("event_id"),
   round: integer("round"),
   points: doublePrecision("points").notNull(),
@@ -238,6 +241,7 @@ export const rankingImportRowSchema = z.object({
 export const rankingImportSchema = z.object({
   batchLabel: z.string().max(120).optional(),
   seasonYear: z.number().int().min(2000).max(3000).optional(),
+  category: z.string().trim().min(1).max(60).optional(),
   rows: z.array(rankingImportRowSchema).min(1),
 });
 

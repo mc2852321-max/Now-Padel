@@ -23,6 +23,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { format } from "date-fns";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
@@ -36,6 +37,7 @@ type NonstopEventSummary = {
   id: number;
   status: "draft" | "active" | "completed" | "cancelled" | string;
   label: string | null;
+  category: string;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -56,6 +58,7 @@ type NavigatorWithWakeLock = Navigator & {
     request: (type: "screen") => Promise<WakeLockSentinelLike>;
   };
 };
+const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
 
 function getConfiguredDuration(
   soundType: string,
@@ -89,6 +92,23 @@ function toLisbonTimeKey(dateLike: Date | string | null | undefined) {
   });
 }
 
+function parseNonstopCategories(raw: string | null | undefined): string[] {
+  try {
+    const parsed = JSON.parse(raw ?? "[]");
+    if (Array.isArray(parsed)) {
+      const unique = Array.from(new Set(
+        parsed
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter(Boolean),
+      ));
+      if (unique.length > 0) return unique;
+    }
+  } catch {
+    // ignore malformed settings payload
+  }
+  return [DEFAULT_NONSTOP_CATEGORY];
+}
+
 export default function Nonstop() {
   const { toast } = useToast();
   const [viewMode, setViewMode] = useState<"current" | "history">("current");
@@ -114,12 +134,17 @@ export default function Nonstop() {
   const editableEvent = currentEvent ?? null;
   const [eventDateInput, setEventDateInput] = useState(toLisbonDayKey(new Date()));
   const [eventTimeInput, setEventTimeInput] = useState("21:30");
+  const [eventCategoryInput, setEventCategoryInput] = useState(DEFAULT_NONSTOP_CATEGORY);
 
   const { data: settings } = useQuery<Settings>({
     queryKey: ["/api/settings"],
     refetchInterval: 3000,
     refetchOnWindowFocus: true,
   });
+  const configuredCategories = useMemo(
+    () => parseNonstopCategories(settings?.nonstopCategories),
+    [settings?.nonstopCategories],
+  );
 
   const playersQuery = useQuery<PlayersPageResponse>({
     queryKey: ["/api/players", "all"],
@@ -280,19 +305,25 @@ export default function Nonstop() {
     if (!editableEvent) {
       setEventDateInput(toLisbonDayKey(new Date()));
       setEventTimeInput("21:30");
+      setEventCategoryInput(configuredCategories[0] ?? DEFAULT_NONSTOP_CATEGORY);
       return;
     }
 
     const eventDate = editableEvent.startedAt ?? editableEvent.createdAt;
     setEventDateInput(toLisbonDayKey(eventDate));
     setEventTimeInput(toLisbonTimeKey(eventDate) || "21:30");
-  }, [editableEvent?.id, editableEvent?.startedAt, editableEvent?.createdAt]);
+    const configuredCurrentCategory = configuredCategories.includes(editableEvent.category)
+      ? editableEvent.category
+      : (configuredCategories[0] || DEFAULT_NONSTOP_CATEGORY);
+    setEventCategoryInput(configuredCurrentCategory);
+  }, [editableEvent?.id, editableEvent?.startedAt, editableEvent?.createdAt, editableEvent?.category, configuredCategories]);
 
   const updateEventMetadataMutation = useMutation({
-    mutationFn: async (payload: { id: number; eventDate: string; eventTime: string }) => {
+    mutationFn: async (payload: { id: number; eventDate: string; eventTime: string; category: string }) => {
       const res = await apiRequest("PATCH", `/api/nonstop/events/${payload.id}`, {
         eventDate: payload.eventDate,
         eventTime: payload.eventTime,
+        category: payload.category,
       });
       return res.json() as Promise<NonstopEventSummary>;
     },
@@ -310,12 +341,12 @@ export default function Nonstop() {
         }
       }
 
-      toast({ title: "Guardado", description: "Data e hora do histórico atualizadas." });
+      toast({ title: "Guardado", description: "Data, hora e categoria do histórico atualizadas." });
     },
     onError: (error: any) => {
       toast({
         title: "Erro",
-        description: error?.message || "Não foi possível atualizar a data e hora do Non Stop.",
+        description: error?.message || "Não foi possível atualizar os metadados do Non Stop.",
         variant: "destructive",
       });
     },
@@ -326,18 +357,27 @@ export default function Nonstop() {
   const currentEventTimeKey = editableEvent
     ? toLisbonTimeKey(editableEvent.startedAt ?? editableEvent.createdAt) || "21:30"
     : "";
+  const currentEventCategoryKey = editableEvent
+    ? (editableEvent.category || configuredCategories[0] || DEFAULT_NONSTOP_CATEGORY)
+    : "";
   const hasEventMetadataChanges = Boolean(
     editableEvent &&
       eventDateInput &&
       eventTimeInput &&
-      (eventDateInput !== currentEventDateKey || eventTimeInput !== currentEventTimeKey),
+      eventCategoryInput &&
+      (
+        eventDateInput !== currentEventDateKey ||
+        eventTimeInput !== currentEventTimeKey ||
+        eventCategoryInput !== currentEventCategoryKey
+      ),
   );
   const saveEventMetadata = async () => {
-    if (!editableEvent || !eventDateInput || !eventTimeInput) return null;
+    if (!editableEvent || !eventDateInput || !eventTimeInput || !eventCategoryInput) return null;
     return updateEventMetadataMutation.mutateAsync({
       id: editableEvent.id,
       eventDate: eventDateInput,
       eventTime: eventTimeInput,
+      category: eventCategoryInput,
     });
   };
 
@@ -1260,6 +1300,9 @@ export default function Nonstop() {
 
   const finalizeAndStartMutation = useMutation({
     mutationFn: async () => {
+      if (hasEventMetadataChanges) {
+        await saveEventMetadata();
+      }
       const res = await apiRequest("POST", "/api/nonstop/finalize-and-start", {});
       return res.json();
     },
@@ -1275,9 +1318,55 @@ export default function Nonstop() {
       queryClient.invalidateQueries({ queryKey: ["/api/results"] });
       queryClient.invalidateQueries({ queryKey: ["/api/nonstop/timer"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ranking"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ranking/history"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ranking/entries"] });
       toast({ title: "Sucesso", description: "Evento finalizado e novo Non Stop iniciado" });
-    }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro",
+        description: error?.message || "Não foi possível finalizar o evento.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteHistoryEventMutation = useMutation({
+    mutationFn: async (eventId: number) => {
+      const res = await apiRequest("DELETE", `/api/nonstop/events/${eventId}`);
+      return res.json() as Promise<{ deletedEventId: number; deletedRankingEntries: number }>;
+    },
+    onSuccess: (result) => {
+      setSelectedHistoryEventId(null);
+      setIsHistoryDrawerOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/nonstop/current"] });
+      queryClient.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/nonstop/events"),
+      });
+      queryClient.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/teams"),
+      });
+      queryClient.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/results"),
+      });
+      queryClient.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/nonstop/timer"),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/ranking"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ranking/history"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ranking/entries"] });
+      toast({
+        title: "Evento apagado",
+        description: `Foram eliminados ${result.deletedRankingEntries} registos de pontos associados a este evento.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro",
+        description: error?.message || "Nao foi possivel apagar este evento.",
+        variant: "destructive",
+      });
+    },
   });
 
   const exportToExcel = async () => {
@@ -1631,6 +1720,9 @@ export default function Nonstop() {
   const stats = getStandings();
   const daysWithEvents = events.map((event) => new Date(event.startedAt ?? event.createdAt));
   const showHistoryEmptyState = viewMode === "history" && !selectedHistoryEventId;
+  const selectedHistoryEventDateLabel = selectedHistoryEvent
+    ? format(new Date(selectedHistoryEvent.startedAt ?? selectedHistoryEvent.createdAt), "dd/MM/yyyy HH:mm")
+    : "";
   const historyEmptyTitle = eventsForSelectedDate.length === 0
     ? "Sem Non Stops neste dia"
     : eventsForSelectedDate.length === 1
@@ -1997,6 +2089,44 @@ export default function Nonstop() {
             </Button>
           </div>
 
+          {readOnlyMode && selectedHistoryEvent && selectedHistoryEvent.status !== "active" ? (
+            <div className={cn(isPresentationMode && "hidden")}>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-9 gap-2 px-3 text-[11px]"
+                    disabled={deleteHistoryEventMutation.isPending}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Apagar evento
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Apagar evento histórico?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Ao apagar este evento, todos os pontos associados aos jogadores neste Non Stop também serão eliminados.
+                    </AlertDialogDescription>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedHistoryEvent.label || selectedHistoryEvent.category || "Non Stop"} · {selectedHistoryEventDateLabel}
+                    </p>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={() => deleteHistoryEventMutation.mutate(selectedHistoryEvent.id)}
+                    >
+                      Confirmar
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          ) : null}
+
           <div className={cn(isPresentationMode && "hidden")}>
             <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -2013,7 +2143,27 @@ export default function Nonstop() {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                <AlertDialogAction onClick={() => finalizeAndStartMutation.mutate()} className="bg-orange-600 text-white hover:bg-orange-500">Confirmar</AlertDialogAction>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <AlertDialogAction
+                        onClick={() => {
+                          if (finalizeAndStartMutation.isPending) return;
+                          finalizeAndStartMutation.mutate();
+                        }}
+                        disabled={finalizeAndStartMutation.isPending}
+                        className="bg-orange-600 text-white hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {finalizeAndStartMutation.isPending ? "A finalizar..." : "Confirmar"}
+                      </AlertDialogAction>
+                    </span>
+                  </TooltipTrigger>
+                  {finalizeAndStartMutation.isPending ? (
+                    <TooltipContent>
+                      Indisponivel: o evento ja esta a ser finalizado e os pontos a ser atribuidos.
+                    </TooltipContent>
+                  ) : null}
+                </Tooltip>
               </AlertDialogFooter>
             </AlertDialogContent>
             </AlertDialog>
@@ -2032,7 +2182,7 @@ export default function Nonstop() {
                 <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <span className="text-xs font-semibold uppercase text-slate-600">Data e hora no histórico</span>
+                      <span className="text-xs font-semibold uppercase text-slate-600">Data, hora e categoria no histórico</span>
                       <p className="text-xs leading-snug text-slate-500">
                         Fica registada no histórico deste Non Stop.
                       </p>
@@ -2058,6 +2208,18 @@ export default function Nonstop() {
                       className="h-9 w-[105px] bg-white text-[12px] font-medium text-slate-900"
                       title="Hora do Non Stop"
                     />
+                    <Select value={eventCategoryInput} onValueChange={setEventCategoryInput}>
+                      <SelectTrigger className="h-9 min-w-[150px] flex-1 bg-white text-[12px] font-medium text-slate-900">
+                        <SelectValue placeholder="Categoria" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {configuredCategories.map((category) => (
+                          <SelectItem key={`event-category-${category}`} value={category}>
+                            {category}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <Button
                       size="sm"
                       className="h-9 gap-1.5 bg-orange-600 px-3 text-[11px] font-semibold text-white hover:bg-orange-500"
@@ -2065,12 +2227,13 @@ export default function Nonstop() {
                         updateEventMetadataMutation.isPending ||
                         !eventDateInput ||
                         !eventTimeInput ||
+                        !eventCategoryInput ||
                         !hasEventMetadataChanges
                       }
                       onClick={() => {
                         void saveEventMetadata();
                       }}
-                      title="Guardar data e hora"
+                      title="Guardar data, hora e categoria"
                     >
                       <Save className="w-3.5 h-3.5" />
                       Guardar
@@ -2385,7 +2548,7 @@ export default function Nonstop() {
                     setIsHistoryDrawerOpen(false);
                   }}
                 >
-                  <span>{event.label || "Non Stop"}</span>
+                  <span>{event.label || event.category || "Non Stop"}</span>
                   <span>{toLisbonTimeKey(event.startedAt ?? event.createdAt)}</span>
                 </Button>
               ))

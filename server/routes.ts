@@ -51,6 +51,7 @@ const finalizeAndStartSchema = z.object({
 
 const nonstopEventMetadataSchema = z.object({
   label: z.string().max(120).nullable().optional(),
+  category: z.string().trim().min(1, "Categoria obrigatoria").max(60).optional(),
   eventDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
     const [year, month, day] = value.split("-").map(Number);
     const parsed = new Date(Date.UTC(year, month - 1, day));
@@ -62,6 +63,9 @@ const nonstopEventMetadataSchema = z.object({
   }, "Hora invalida").optional(),
 });
 const LISBON_TIMEZONE = "Europe/Lisbon";
+const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
+const RANKING_ALL_CATEGORIES_TOKEN = "__all__";
+const RANKING_GENERAL_LABEL = "Geral";
 
 type BootstrapAuthUser = {
   email: string;
@@ -81,6 +85,41 @@ function parseSeasonYear(value: unknown): number | undefined {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 2000 || parsed > 3000) return undefined;
   return parsed;
+}
+
+function parseRankingScope(value: unknown): "category" | "all" {
+  return String(value ?? "").trim().toLowerCase() === "all"
+    ? "all"
+    : "category";
+}
+
+function normalizeCategoryName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleaned = value.trim().replace(/\s+/g, " ");
+  if (!cleaned) return undefined;
+  if (cleaned.length <= 60) return cleaned;
+  return cleaned.slice(0, 60).trim() || undefined;
+}
+
+function parseConfiguredNonstopCategories(raw: unknown): string[] {
+  if (typeof raw !== "string" || !raw.trim()) return [DEFAULT_NONSTOP_CATEGORY];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [DEFAULT_NONSTOP_CATEGORY];
+  }
+
+  if (!Array.isArray(parsed)) return [DEFAULT_NONSTOP_CATEGORY];
+  const unique = new Set<string>();
+  for (const item of parsed) {
+    const category = normalizeCategoryName(item);
+    if (!category) continue;
+    unique.add(category);
+  }
+  if (unique.size === 0) return [DEFAULT_NONSTOP_CATEGORY];
+  return Array.from(unique);
 }
 
 function getLisbonYear(dateLike?: Date | string | null): number {
@@ -564,6 +603,21 @@ export async function registerRoutes(
       if (!current) {
         return res.status(404).json({ message: "Event not found" });
       }
+      let category: string | undefined;
+      if (input.category !== undefined) {
+        const nextCategory = normalizeCategoryName(input.category);
+        if (!nextCategory) {
+          return res.status(400).json({ message: "Categoria invalida" });
+        }
+        const appSettings = await storage.getSettings();
+        const configuredCategories = parseConfiguredNonstopCategories(appSettings.nonstopCategories);
+        if (!configuredCategories.includes(nextCategory)) {
+          return res.status(400).json({
+            message: "A categoria escolhida nao existe na configuracao do clube.",
+          });
+        }
+        category = nextCategory;
+      }
 
       let startedAt: Date | undefined;
       if (input.eventDate !== undefined || input.eventTime !== undefined) {
@@ -578,6 +632,7 @@ export async function registerRoutes(
       const event = await storage.updateNonstopEventMetadata(id, {
         label: input.label,
         startedAt,
+        category,
       });
       if (!event) {
         return res.status(404).json({ message: "Event not found" });
@@ -591,6 +646,29 @@ export async function registerRoutes(
           field: err.errors[0].path.join("."),
         });
       }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/nonstop/events/:id", isAuthenticated, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ message: "Invalid event id" });
+      }
+
+      const result = await storage.deleteNonstopEvent(id);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      if (err instanceof Error && err.message === "EVENT_NOT_FOUND") {
+        return res.status(404).json({ message: "Event not found" });
+      }
+      if (err instanceof Error && err.message === "ACTIVE_EVENT_DELETE_NOT_ALLOWED") {
+        return res.status(400).json({
+          message: "Nao e possivel apagar o evento ativo. Finaliza-o primeiro.",
+        });
+      }
+      console.error("[nonstop/events/delete] error:", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -740,16 +818,32 @@ export async function registerRoutes(
     try {
       const onlyWithPoints = String(req.query.onlyWithPoints ?? "1") !== "0";
       const requestedSeason = parseSeasonYear(req.query.season);
+      const requestedCategory = normalizeCategoryName(req.query.category);
+      const scope = parseRankingScope(req.query.scope);
+      const shouldIncludeAllCategories = scope === "all" || requestedCategory === RANKING_ALL_CATEGORIES_TOKEN;
       const parsedPage = Number(req.query.page ?? 1);
       const parsedPageSize = Number(req.query.pageSize ?? 25);
       const page = Number.isFinite(parsedPage) ? Math.max(1, Math.trunc(parsedPage)) : 1;
       const pageSize = Number.isFinite(parsedPageSize)
         ? Math.min(100, Math.max(10, Math.trunc(parsedPageSize)))
         : 25;
-      const availableSeasons = await storage.getRankingSeasons();
+      const [availableSeasons, availableCategories] = await Promise.all([
+        storage.getRankingSeasons(),
+        storage.getRankingCategories(),
+      ]);
       const currentSeason = getLisbonYear();
       const season = requestedSeason ?? availableSeasons[0] ?? currentSeason;
-      const leaderboard = await storage.getRankingLeaderboard(season);
+      const category = shouldIncludeAllCategories
+        ? RANKING_GENERAL_LABEL
+        : (
+          requestedCategory && availableCategories.includes(requestedCategory)
+            ? requestedCategory
+            : (availableCategories[0] ?? DEFAULT_NONSTOP_CATEGORY)
+        );
+      const leaderboard = await storage.getRankingLeaderboard(
+        season,
+        shouldIncludeAllCategories ? RANKING_ALL_CATEGORIES_TOKEN : category,
+      );
       const filtered = onlyWithPoints
         ? leaderboard.filter((row) => row.totalPoints !== 0 || row.participationCount > 0 || row.roundWins > 0)
         : leaderboard;
@@ -763,7 +857,10 @@ export async function registerRoutes(
 
       res.json({
         season,
+        category,
+        scope: shouldIncludeAllCategories ? "all" : "category",
         availableSeasons,
+        availableCategories,
         page: currentPage,
         pageSize,
         total,
@@ -828,11 +925,55 @@ export async function registerRoutes(
     try {
       const playerId = parseEventId(req.query.playerId);
       const season = parseSeasonYear(req.query.season);
-      const entries = await storage.getRankingEntries(playerId, season);
+      const category = normalizeCategoryName(req.query.category);
+      const scope = parseRankingScope(req.query.scope);
+      const targetCategory = scope === "all" || category === RANKING_ALL_CATEGORIES_TOKEN
+        ? RANKING_ALL_CATEGORIES_TOKEN
+        : category;
+      const entries = await storage.getRankingEntries(playerId, season, targetCategory);
       res.json(entries);
     } catch (err) {
       console.error("[ranking/entries] error:", err);
       res.status(500).json({ message: "Erro ao carregar historico de pontos" });
+    }
+  });
+
+  app.get("/api/ranking/history", isAuthenticated, async (req, res) => {
+    try {
+      const requestedCategory = normalizeCategoryName(req.query.category);
+      const scope = parseRankingScope(req.query.scope);
+      const shouldIncludeAllCategories = scope === "all" || requestedCategory === RANKING_ALL_CATEGORIES_TOKEN;
+      const parsedLimit = Number(req.query.limitSeasons ?? 2);
+      const limitSeasons = Number.isFinite(parsedLimit)
+        ? Math.min(5, Math.max(1, Math.trunc(parsedLimit)))
+        : 2;
+      const [availableCategories, availableSeasons] = await Promise.all([
+        storage.getRankingCategories(),
+        storage.getRankingSeasons(),
+      ]);
+      const category = shouldIncludeAllCategories
+        ? RANKING_GENERAL_LABEL
+        : (
+          requestedCategory && availableCategories.includes(requestedCategory)
+            ? requestedCategory
+            : (availableCategories[0] ?? DEFAULT_NONSTOP_CATEGORY)
+        );
+      const items = await storage.getRankingHistory({
+        category: shouldIncludeAllCategories ? RANKING_ALL_CATEGORIES_TOKEN : category,
+        limitSeasons,
+      });
+
+      res.json({
+        category,
+        scope: shouldIncludeAllCategories ? "all" : "category",
+        limitSeasons,
+        availableCategories,
+        availableSeasons,
+        items,
+      });
+    } catch (err) {
+      console.error("[ranking/history] error:", err);
+      res.status(500).json({ message: "Erro ao carregar historico do ranking" });
     }
   });
 
@@ -853,6 +994,7 @@ export async function registerRoutes(
       const inserted = await storage.importRankingBasePoints(input.rows, {
         batchLabel: input.batchLabel,
         seasonYear: input.seasonYear,
+        category: input.category,
         userEmail: (req.session as any)?.userEmail ?? null,
       });
 
@@ -1144,6 +1286,7 @@ export async function registerRoutes(
         id SERIAL PRIMARY KEY,
         status TEXT NOT NULL DEFAULT 'active',
         label TEXT,
+        category TEXT NOT NULL DEFAULT 'Non Stop',
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         started_at TIMESTAMP,
         completed_at TIMESTAMP,
@@ -1155,6 +1298,17 @@ export async function registerRoutes(
 
     await db.execute(sql`
       CREATE INDEX IF NOT EXISTS idx_nonstop_events_created_at ON nonstop_events (created_at DESC)
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE nonstop_events
+      ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Non Stop'
+    `);
+
+    await db.execute(sql`
+      UPDATE nonstop_events
+      SET category = 'Non Stop'
+      WHERE category IS NULL OR BTRIM(category) = ''
     `);
 
     await db.execute(sql`
@@ -1262,7 +1416,7 @@ export async function registerRoutes(
         LIMIT 1;
 
         IF active_event_id IS NULL THEN
-          INSERT INTO nonstop_events(status) VALUES ('active') RETURNING id INTO active_event_id;
+          INSERT INTO nonstop_events(status, category) VALUES ('active', 'Non Stop') RETURNING id INTO active_event_id;
         END IF;
 
         UPDATE teams SET event_id = active_event_id WHERE event_id IS NULL;
@@ -1321,7 +1475,8 @@ export async function registerRoutes(
         sound_duration_target TEXT NOT NULL DEFAULT 'air-horn',
         sound_duration_seconds INTEGER NOT NULL DEFAULT 5,
         tie_breaker TEXT NOT NULL DEFAULT 'direct',
-        player_profile_options TEXT NOT NULL DEFAULT '["Academia","Fecha jogos","Non Stop"]'
+        player_profile_options TEXT NOT NULL DEFAULT '["Academia","Fecha jogos","Non Stop"]',
+        nonstop_categories TEXT NOT NULL DEFAULT '["Non Stop"]'
       )
     `);
 
@@ -1330,6 +1485,7 @@ export async function registerRoutes(
         id SERIAL PRIMARY KEY,
         player_id INTEGER NOT NULL,
         season_year INTEGER NOT NULL,
+        category TEXT NOT NULL DEFAULT 'Non Stop',
         event_id INTEGER,
         round INTEGER,
         points DOUBLE PRECISION NOT NULL,
@@ -1357,6 +1513,11 @@ export async function registerRoutes(
     `);
 
     await db.execute(sql`
+      ALTER TABLE ranking_entries
+      ADD COLUMN IF NOT EXISTS category TEXT
+    `);
+
+    await db.execute(sql`
       UPDATE ranking_entries re
       SET season_year = EXTRACT(YEAR FROM (COALESCE(ne.started_at, ne.created_at) AT TIME ZONE 'Europe/Lisbon'))::INTEGER
       FROM nonstop_events ne
@@ -1371,13 +1532,42 @@ export async function registerRoutes(
     `);
 
     await db.execute(sql`
+      UPDATE ranking_entries re
+      SET category = COALESCE(NULLIF(BTRIM(ne.category), ''), 'Non Stop')
+      FROM nonstop_events ne
+      WHERE re.event_id = ne.id
+        AND (re.category IS NULL OR BTRIM(re.category) = '')
+    `);
+
+    await db.execute(sql`
+      UPDATE ranking_entries
+      SET category = 'Non Stop'
+      WHERE category IS NULL OR BTRIM(category) = ''
+    `);
+
+    await db.execute(sql`
       ALTER TABLE ranking_entries
       ALTER COLUMN season_year SET NOT NULL
     `);
 
     await db.execute(sql`
+      ALTER TABLE ranking_entries
+      ALTER COLUMN category SET DEFAULT 'Non Stop'
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE ranking_entries
+      ALTER COLUMN category SET NOT NULL
+    `);
+
+    await db.execute(sql`
       CREATE INDEX IF NOT EXISTS idx_ranking_entries_season_year
       ON ranking_entries (season_year DESC)
+    `);
+
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_ranking_entries_season_category
+      ON ranking_entries (season_year DESC, category)
     `);
 
     await db.execute(sql`
@@ -1762,6 +1952,11 @@ export async function registerRoutes(
     await db.execute(sql`
       ALTER TABLE settings
       ADD COLUMN IF NOT EXISTS player_profile_options TEXT NOT NULL DEFAULT '["Academia","Fecha jogos","Non Stop"]'
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE settings
+      ADD COLUMN IF NOT EXISTS nonstop_categories TEXT NOT NULL DEFAULT '["Non Stop"]'
     `);
 
     await db.execute(sql`

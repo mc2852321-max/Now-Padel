@@ -10,11 +10,12 @@ import { Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Eye, EyeOff, Re
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Settings as SettingsType, AuthorizedUser, WhatsappStatusResponse } from "@shared/schema";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
@@ -37,6 +38,56 @@ function formatPhoneNumber(value?: string | null) {
     return `+351 ${digits.slice(3, 6)} ${digits.slice(6, 9)} ${digits.slice(9)}`;
   }
   return value;
+}
+
+function parseLineListSetting(raw: string | null | undefined, fallback: string[]): string[] {
+  try {
+    const parsed = JSON.parse(raw ?? "[]");
+    if (Array.isArray(parsed)) {
+      const unique = new Set(
+        parsed
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter(Boolean),
+      );
+      if (unique.size > 0) return Array.from(unique);
+    }
+  } catch {
+    // ignore invalid saved data and fallback
+  }
+  return fallback;
+}
+
+function encodeLineListSetting(raw: unknown, fallback: string[]): string {
+  const lines = String(raw ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const unique = Array.from(new Set(lines));
+  return JSON.stringify(unique.length > 0 ? unique : fallback);
+}
+
+function listLines(raw: unknown): string[] {
+  return String(raw ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function findDuplicateLines(raw: unknown): string[] {
+  const seen = new Map<string, string>();
+  const duplicates = new Set<string>();
+
+  for (const line of listLines(raw)) {
+    const key = line.toLocaleLowerCase("pt-PT");
+    if (seen.has(key)) {
+      duplicates.add(seen.get(key)!);
+      duplicates.add(line);
+      continue;
+    }
+    seen.set(key, line);
+  }
+
+  return Array.from(duplicates);
 }
 
 export function playPreviewSound(soundType: string, config?: DurationConfig) {
@@ -642,6 +693,7 @@ export default function Settings() {
       soundDurationTarget: "air-horn",
       soundDurationSeconds: 5,
       playerProfileOptions: "Academia\nFecha jogos\nNon Stop",
+      nonstopCategories: "Non Stop",
       startWarmupSound: "beep-low",
       startGameSound: "beep-high",
       endGameSound: "beep-low",
@@ -667,13 +719,8 @@ export default function Settings() {
         airHornDuration: settings.airHornDuration ?? 5,
         soundDurationTarget: settings.soundDurationTarget ?? "air-horn",
         soundDurationSeconds: settings.soundDurationSeconds ?? settings.airHornDuration ?? 5,
-        playerProfileOptions: (() => {
-          try {
-            const parsed = JSON.parse(settings.playerProfileOptions ?? "[]");
-            if (Array.isArray(parsed)) return parsed.join("\n");
-          } catch {}
-          return "Academia\nFecha jogos\nNon Stop";
-        })(),
+        playerProfileOptions: parseLineListSetting(settings.playerProfileOptions, ["Academia", "Fecha jogos", "Non Stop"]).join("\n"),
+        nonstopCategories: parseLineListSetting(settings.nonstopCategories, ["Non Stop"]).join("\n"),
         startWarmupSound: settings.startWarmupSound,
         startGameSound: settings.startGameSound,
         endGameSound: settings.endGameSound,
@@ -684,16 +731,20 @@ export default function Settings() {
   }, [settings, form]);
 
   const [activeTab, setActiveTab] = useState("nonstop");
+  const [confirmDeleteCategoriesOpen, setConfirmDeleteCategoriesOpen] = useState(false);
+  const [pendingSettingsSave, setPendingSettingsSave] = useState<any | null>(null);
+  const [categoriesPendingDelete, setCategoriesPendingDelete] = useState<string[]>([]);
+  const currentNonstopCategories = useMemo(
+    () => parseLineListSetting(settings?.nonstopCategories, ["Non Stop"]),
+    [settings?.nonstopCategories],
+  );
 
   const mutation = useMutation({
     mutationFn: async (data: any) => {
-      const profileOptions = String(data.playerProfileOptions ?? "")
-        .split("\n")
-        .map((opt) => opt.trim())
-        .filter(Boolean);
       const res = await apiRequest("POST", "/api/settings", {
         ...data,
-        playerProfileOptions: JSON.stringify(profileOptions),
+        playerProfileOptions: encodeLineListSetting(data.playerProfileOptions, ["Academia", "Fecha jogos", "Non Stop"]),
+        nonstopCategories: encodeLineListSetting(data.nonstopCategories, ["Non Stop"]),
         whatsappNotifications: data.whatsappNotifications ? 1 : 0,
         emailNotifications: data.emailNotifications ? 1 : 0,
         publicRegistration: data.publicRegistration ? 1 : 0
@@ -702,9 +753,45 @@ export default function Settings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ranking"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ranking/history"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/nonstop/current"] });
+      queryClient.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/nonstop/events"),
+      });
+      setPendingSettingsSave(null);
+      setCategoriesPendingDelete([]);
+      setConfirmDeleteCategoriesOpen(false);
       toast({ title: "Definições guardadas", description: "As alterações foram aplicadas com sucesso." });
     }
   });
+
+  const submitSettings = (data: any) => {
+    const duplicatedCategories = findDuplicateLines(data.nonstopCategories);
+    if (duplicatedCategories.length > 0) {
+      toast({
+        title: "Categorias duplicadas",
+        description: "Existem categorias repetidas. Mantem apenas uma ocorrência por categoria.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const nextCategories = parseLineListSetting(
+      encodeLineListSetting(data.nonstopCategories, ["Non Stop"]),
+      ["Non Stop"],
+    );
+    const removedCategories = currentNonstopCategories.filter((category) => !nextCategories.includes(category));
+
+    if (removedCategories.length > 0 && !confirmDeleteCategoriesOpen) {
+      setPendingSettingsSave(data);
+      setCategoriesPendingDelete(removedCategories);
+      setConfirmDeleteCategoriesOpen(true);
+      return;
+    }
+
+    mutation.mutate(data);
+  };
 
   if (isLoading) {
     return (
@@ -732,7 +819,7 @@ export default function Settings() {
 
         {activeTab !== "access" && activeTab !== "whatsapp" && (
           <Form {...form}>
-            <form onSubmit={form.handleSubmit((data) => mutation.mutate(data))} className="space-y-6">
+            <form onSubmit={form.handleSubmit(submitSettings)} className="space-y-6">
               <TabsContent value="nonstop" className="space-y-6 mt-6" forceMount={activeTab === "nonstop" ? true : undefined}>
               <Card>
                 <CardHeader>
@@ -868,6 +955,37 @@ export default function Settings() {
                       )} />
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Categorias do Ranking</CardTitle>
+                  <CardDescription>
+                    Uma categoria por linha. Estas categorias ficam disponiveis no Non Stop e no filtro do ranking.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <FormField
+                    control={form.control}
+                    name="nonstopCategories"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Categorias</FormLabel>
+                        <FormControl>
+                          <textarea
+                            className="w-full min-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            placeholder={"Non Stop\nNow Nights\nNow Mix"}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Ao remover uma categoria daqui, ela deixa de estar disponivel para novos eventos.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </CardContent>
               </Card>
 
@@ -1127,11 +1245,13 @@ export default function Settings() {
                                   try {
                                     await apiRequest("POST", "/api/settings", {
                                       ...form.getValues(),
-                                      playerProfileOptions: JSON.stringify(
-                                        String(form.getValues().playerProfileOptions ?? "")
-                                          .split("\n")
-                                          .map((opt) => opt.trim())
-                                          .filter(Boolean)
+                                      playerProfileOptions: encodeLineListSetting(
+                                        form.getValues().playerProfileOptions,
+                                        ["Academia", "Fecha jogos", "Non Stop"],
+                                      ),
+                                      nonstopCategories: encodeLineListSetting(
+                                        form.getValues().nonstopCategories,
+                                        ["Non Stop"],
                                       ),
                                       logo: base64,
                                       whatsappNotifications: form.getValues().whatsappNotifications ? 1 : 0,
@@ -1250,13 +1370,8 @@ export default function Settings() {
                         airHornDuration: settings.airHornDuration ?? 5,
                         soundDurationTarget: settings.soundDurationTarget ?? "air-horn",
                         soundDurationSeconds: settings.soundDurationSeconds ?? settings.airHornDuration ?? 5,
-                        playerProfileOptions: (() => {
-                          try {
-                            const parsed = JSON.parse(settings.playerProfileOptions ?? "[]");
-                            if (Array.isArray(parsed)) return parsed.join("\n");
-                          } catch {}
-                          return "Academia\nFecha jogos\nNon Stop";
-                        })(),
+                        playerProfileOptions: parseLineListSetting(settings.playerProfileOptions, ["Academia", "Fecha jogos", "Non Stop"]).join("\n"),
+                        nonstopCategories: parseLineListSetting(settings.nonstopCategories, ["Non Stop"]).join("\n"),
                         startWarmupSound: settings.startWarmupSound,
                         startGameSound: settings.startGameSound,
                         endGameSound: settings.endGameSound,
@@ -1275,6 +1390,40 @@ export default function Settings() {
                   Guardar Alterações
                 </Button>
               </div>
+              <AlertDialog open={confirmDeleteCategoriesOpen} onOpenChange={setConfirmDeleteCategoriesOpen}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Eliminar este evento/categoria?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Ao eliminar {categoriesPendingDelete.length > 1 ? "estes eventos/categorias" : "este evento/categoria"}, todos os pontos associados aos jogadores nessas categorias serão removidos.
+                    </AlertDialogDescription>
+                    {categoriesPendingDelete.length > 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        {categoriesPendingDelete.join(", ")}
+                      </p>
+                    ) : null}
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel
+                      onClick={() => {
+                        setPendingSettingsSave(null);
+                        setCategoriesPendingDelete([]);
+                      }}
+                    >
+                      Cancelar
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={() => {
+                        if (!pendingSettingsSave) return;
+                        mutation.mutate(pendingSettingsSave);
+                      }}
+                    >
+                      Sim, eliminar e guardar
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </form>
           </Form>
         )}

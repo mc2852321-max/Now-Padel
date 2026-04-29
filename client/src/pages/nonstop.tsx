@@ -1071,7 +1071,14 @@ export default function Nonstop() {
       return res.json();
     },
     onSuccess: async (newTeam) => {
-      const currentTeams = [...(teams || []), newTeam];
+      let currentTeams = [...(teams || []), newTeam];
+      try {
+        const teamsResponse = await apiRequest("GET", "/api/teams");
+        currentTeams = (await teamsResponse.json()) as Team[];
+      } catch (error) {
+        console.warn("Failed to refresh teams after create:", error);
+      }
+
       if (currentTeams.length >= numTeams) {
         setIsTeamDialogOpen(false);
       }
@@ -2074,6 +2081,7 @@ export default function Nonstop() {
               <TeamForm
                 players={availablePlayers}
                 teams={teams || []}
+                isSubmitting={createTeamMutation.isPending || updateEventMetadataMutation.isPending}
                 onSubmit={async (data) => {
                   if (hasEventMetadataChanges) {
                     try {
@@ -2082,7 +2090,7 @@ export default function Nonstop() {
                       return;
                     }
                   }
-                  createTeamMutation.mutate(data);
+                  await createTeamMutation.mutateAsync(data);
                 }}
                 key={teams?.length || 0}
               />
@@ -2414,6 +2422,7 @@ function TeamForm({
   editingTeamId,
   defaultValues,
   submitLabel = "Adicionar",
+  isSubmitting = false,
 }: {
   onSubmit: (data: any) => void;
   players: Player[];
@@ -2421,6 +2430,7 @@ function TeamForm({
   editingTeamId?: number;
   defaultValues?: Partial<Team>;
   submitLabel?: string;
+  isSubmitting?: boolean;
 }) {
   const playersById = useMemo(
     () => new Map(players.map((player) => [player.id, player])),
@@ -2618,7 +2628,7 @@ function TeamForm({
             </FormItem>
           )}
         />
-        <Button type="submit" className="w-full">{submitLabel}</Button>
+        <Button type="submit" className="w-full" disabled={isSubmitting}>{submitLabel}</Button>
       </form>
     </Form>
   );

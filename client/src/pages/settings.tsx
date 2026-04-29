@@ -6,7 +6,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormDescription, For
 import { Badge } from "@/components/ui/badge";
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
-import { Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Eye, EyeOff, RefreshCw } from "lucide-react";
+import { Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Eye, EyeOff, RefreshCw, Plus } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Settings as SettingsType, AuthorizedUser, WhatsappStatusResponse } from "@shared/schema";
@@ -88,6 +88,13 @@ function findDuplicateLines(raw: unknown): string[] {
   }
 
   return Array.from(duplicates);
+}
+
+function categoriesToLineList(categories: string[]): string {
+  return categories
+    .map((category) => category.trim())
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function playPreviewSound(soundType: string, config?: DurationConfig) {
@@ -704,6 +711,8 @@ export default function Settings() {
 
   useEffect(() => {
     if (settings) {
+      const loadedCategories = parseLineListSetting(settings.nonstopCategories, ["Non Stop"]);
+      setRankingCategoriesDraft(loadedCategories);
       form.reset({
         clubName: settings.clubName,
         primaryColor: settings.primaryColor,
@@ -720,7 +729,7 @@ export default function Settings() {
         soundDurationTarget: settings.soundDurationTarget ?? "air-horn",
         soundDurationSeconds: settings.soundDurationSeconds ?? settings.airHornDuration ?? 5,
         playerProfileOptions: parseLineListSetting(settings.playerProfileOptions, ["Academia", "Fecha jogos", "Non Stop"]).join("\n"),
-        nonstopCategories: parseLineListSetting(settings.nonstopCategories, ["Non Stop"]).join("\n"),
+        nonstopCategories: loadedCategories.join("\n"),
         startWarmupSound: settings.startWarmupSound,
         startGameSound: settings.startGameSound,
         endGameSound: settings.endGameSound,
@@ -734,10 +743,30 @@ export default function Settings() {
   const [confirmDeleteCategoriesOpen, setConfirmDeleteCategoriesOpen] = useState(false);
   const [pendingSettingsSave, setPendingSettingsSave] = useState<any | null>(null);
   const [categoriesPendingDelete, setCategoriesPendingDelete] = useState<string[]>([]);
+  const [rankingCategoriesDraft, setRankingCategoriesDraft] = useState<string[]>(["Non Stop"]);
   const currentNonstopCategories = useMemo(
     () => parseLineListSetting(settings?.nonstopCategories, ["Non Stop"]),
     [settings?.nonstopCategories],
   );
+  const hasEmptyRankingCategory = rankingCategoriesDraft.some((category) => !category.trim());
+
+  const updateRankingCategoryAt = (index: number, value: string) => {
+    setRankingCategoriesDraft((current) => current.map((item, itemIndex) => (
+      itemIndex === index ? value : item
+    )));
+  };
+
+  const addRankingCategory = () => {
+    setRankingCategoriesDraft((current) => [...current, ""]);
+  };
+
+  const removeRankingCategoryAt = (index: number) => {
+    setRankingCategoriesDraft((current) => {
+      if (current.length <= 1) return current;
+      const next = current.filter((_, itemIndex) => itemIndex !== index);
+      return next.length > 0 ? next : ["Non Stop"];
+    });
+  };
 
   const mutation = useMutation({
     mutationFn: async (data: any) => {
@@ -767,7 +796,8 @@ export default function Settings() {
   });
 
   const submitSettings = (data: any) => {
-    const duplicatedCategories = findDuplicateLines(data.nonstopCategories);
+    const categoriesAsLines = categoriesToLineList(rankingCategoriesDraft);
+    const duplicatedCategories = findDuplicateLines(categoriesAsLines);
     if (duplicatedCategories.length > 0) {
       toast({
         title: "Categorias duplicadas",
@@ -778,19 +808,23 @@ export default function Settings() {
     }
 
     const nextCategories = parseLineListSetting(
-      encodeLineListSetting(data.nonstopCategories, ["Non Stop"]),
+      encodeLineListSetting(categoriesAsLines, ["Non Stop"]),
       ["Non Stop"],
     );
+    const payload = {
+      ...data,
+      nonstopCategories: nextCategories.join("\n"),
+    };
     const removedCategories = currentNonstopCategories.filter((category) => !nextCategories.includes(category));
 
     if (removedCategories.length > 0 && !confirmDeleteCategoriesOpen) {
-      setPendingSettingsSave(data);
+      setPendingSettingsSave(payload);
       setCategoriesPendingDelete(removedCategories);
       setConfirmDeleteCategoriesOpen(true);
       return;
     }
 
-    mutation.mutate(data);
+    mutation.mutate(payload);
   };
 
   if (isLoading) {
@@ -955,37 +989,6 @@ export default function Settings() {
                       )} />
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Categorias do Ranking</CardTitle>
-                  <CardDescription>
-                    Uma categoria por linha. Estas categorias ficam disponiveis no Non Stop e no filtro do ranking.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <FormField
-                    control={form.control}
-                    name="nonstopCategories"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Categorias</FormLabel>
-                        <FormControl>
-                          <textarea
-                            className="w-full min-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm"
-                            placeholder={"Non Stop\nNow Nights\nNow Mix"}
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          Ao remover uma categoria daqui, ela deixa de estar disponivel para novos eventos.
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
                 </CardContent>
               </Card>
 
@@ -1182,6 +1185,61 @@ export default function Settings() {
 
               <Card>
                 <CardHeader>
+                  <CardTitle>Categorias do Ranking</CardTitle>
+                  <CardDescription>
+                    Escolhe as categorias disponiveis no Non Stop e no filtro do ranking.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="space-y-2">
+                    {rankingCategoriesDraft.map((category, index) => (
+                      <div key={`ranking-category-row-${index}`} className="flex flex-col gap-2 sm:flex-row">
+                        <Input
+                          value={category}
+                          onChange={(event) => updateRankingCategoryAt(index, event.target.value)}
+                          placeholder={index === 0 ? "Non Stop" : `Categoria ${index + 1}`}
+                          className="h-10"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-10 w-10 shrink-0"
+                          onClick={() => removeRankingCategoryAt(index)}
+                          disabled={rankingCategoriesDraft.length <= 1}
+                          title={rankingCategoriesDraft.length <= 1
+                            ? "Tem de existir pelo menos uma categoria."
+                            : "Remover categoria"}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full gap-2 sm:w-auto"
+                      onClick={addRankingCategory}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Adicionar categoria
+                    </Button>
+                    {hasEmptyRankingCategory ? (
+                      <p className="text-xs text-amber-700">
+                        Existem categorias vazias. Preenche ou remove as linhas sem nome.
+                      </p>
+                    ) : null}
+                  </div>
+                  <FormDescription>
+                    Ao remover uma categoria, os pontos dessa categoria deixam de existir no ranking.
+                  </FormDescription>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
                   <CardTitle>Regras do Torneio</CardTitle>
                   <CardDescription>Critérios de pontuação e desempate aplicados automaticamente.</CardDescription>
                 </CardHeader>
@@ -1250,7 +1308,7 @@ export default function Settings() {
                                         ["Academia", "Fecha jogos", "Non Stop"],
                                       ),
                                       nonstopCategories: encodeLineListSetting(
-                                        form.getValues().nonstopCategories,
+                                        categoriesToLineList(rankingCategoriesDraft),
                                         ["Non Stop"],
                                       ),
                                       logo: base64,
@@ -1355,6 +1413,8 @@ export default function Settings() {
                   variant="secondary" 
                   onClick={() => {
                     if (settings) {
+                      const resetCategories = parseLineListSetting(settings.nonstopCategories, ["Non Stop"]);
+                      setRankingCategoriesDraft(resetCategories);
                       form.reset({
                         clubName: settings.clubName,
                         primaryColor: settings.primaryColor,
@@ -1371,7 +1431,7 @@ export default function Settings() {
                         soundDurationTarget: settings.soundDurationTarget ?? "air-horn",
                         soundDurationSeconds: settings.soundDurationSeconds ?? settings.airHornDuration ?? 5,
                         playerProfileOptions: parseLineListSetting(settings.playerProfileOptions, ["Academia", "Fecha jogos", "Non Stop"]).join("\n"),
-                        nonstopCategories: parseLineListSetting(settings.nonstopCategories, ["Non Stop"]).join("\n"),
+                        nonstopCategories: resetCategories.join("\n"),
                         startWarmupSound: settings.startWarmupSound,
                         startGameSound: settings.startGameSound,
                         endGameSound: settings.endGameSound,

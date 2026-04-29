@@ -713,6 +713,7 @@ export default function Settings() {
     if (settings) {
       const loadedCategories = parseLineListSetting(settings.nonstopCategories, ["Non Stop"]);
       setRankingCategoriesDraft(loadedCategories);
+      setNewRankingCategoryName("");
       form.reset({
         clubName: settings.clubName,
         primaryColor: settings.primaryColor,
@@ -744,20 +745,41 @@ export default function Settings() {
   const [pendingSettingsSave, setPendingSettingsSave] = useState<any | null>(null);
   const [categoriesPendingDelete, setCategoriesPendingDelete] = useState<string[]>([]);
   const [rankingCategoriesDraft, setRankingCategoriesDraft] = useState<string[]>(["Non Stop"]);
+  const [isAddCategoryDialogOpen, setIsAddCategoryDialogOpen] = useState(false);
+  const [newRankingCategoryName, setNewRankingCategoryName] = useState("");
   const currentNonstopCategories = useMemo(
     () => parseLineListSetting(settings?.nonstopCategories, ["Non Stop"]),
     [settings?.nonstopCategories],
   );
-  const hasEmptyRankingCategory = rankingCategoriesDraft.some((category) => !category.trim());
 
-  const updateRankingCategoryAt = (index: number, value: string) => {
-    setRankingCategoriesDraft((current) => current.map((item, itemIndex) => (
-      itemIndex === index ? value : item
-    )));
-  };
+  const sanitizeRankingCategoryName = (value: string) => value.trim().replace(/\s+/g, " ");
 
   const addRankingCategory = () => {
-    setRankingCategoriesDraft((current) => [...current, ""]);
+    const cleanName = sanitizeRankingCategoryName(newRankingCategoryName);
+    if (!cleanName) {
+      toast({
+        title: "Nome em falta",
+        description: "Indica o nome da categoria antes de confirmar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const alreadyExists = rankingCategoriesDraft.some(
+      (category) => sanitizeRankingCategoryName(category).toLocaleLowerCase("pt-PT") === cleanName.toLocaleLowerCase("pt-PT"),
+    );
+    if (alreadyExists) {
+      toast({
+        title: "Categoria duplicada",
+        description: "Essa categoria já existe na lista.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setRankingCategoriesDraft((current) => [...current, cleanName]);
+    setNewRankingCategoryName("");
+    setIsAddCategoryDialogOpen(false);
   };
 
   const removeRankingCategoryAt = (index: number) => {
@@ -1193,18 +1215,13 @@ export default function Settings() {
                 <CardContent className="space-y-3">
                   <div className="space-y-2">
                     {rankingCategoriesDraft.map((category, index) => (
-                      <div key={`ranking-category-row-${index}`} className="flex flex-col gap-2 sm:flex-row">
-                        <Input
-                          value={category}
-                          onChange={(event) => updateRankingCategoryAt(index, event.target.value)}
-                          placeholder={index === 0 ? "Non Stop" : `Categoria ${index + 1}`}
-                          className="h-10"
-                        />
+                      <div key={`ranking-category-row-${index}`} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                        <p className="text-sm font-medium text-slate-900">{category}</p>
                         <Button
                           type="button"
                           variant="outline"
                           size="icon"
-                          className="h-10 w-10 shrink-0"
+                          className="h-8 w-8 shrink-0"
                           onClick={() => removeRankingCategoryAt(index)}
                           disabled={rankingCategoriesDraft.length <= 1}
                           title={rankingCategoriesDraft.length <= 1
@@ -1216,22 +1233,51 @@ export default function Settings() {
                       </div>
                     ))}
                   </div>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="w-full gap-2 sm:w-auto"
-                      onClick={addRankingCategory}
-                    >
-                      <Plus className="h-4 w-4" />
-                      Adicionar categoria
-                    </Button>
-                    {hasEmptyRankingCategory ? (
-                      <p className="text-xs text-amber-700">
-                        Existem categorias vazias. Preenche ou remove as linhas sem nome.
-                      </p>
-                    ) : null}
-                  </div>
+                  <Dialog
+                    open={isAddCategoryDialogOpen}
+                    onOpenChange={(open) => {
+                      setIsAddCategoryDialogOpen(open);
+                      if (!open) setNewRankingCategoryName("");
+                    }}
+                  >
+                    <DialogTrigger asChild>
+                      <Button type="button" variant="secondary" className="w-full gap-2 sm:w-auto">
+                        <Plus className="h-4 w-4" />
+                        Adicionar categoria
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Nova categoria</DialogTitle>
+                        <DialogDescription>
+                          Escreve o nome da nova categoria para o ranking e para os novos Non Stop.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-2">
+                        <Label htmlFor="new-ranking-category">Nome da categoria</Label>
+                        <Input
+                          id="new-ranking-category"
+                          value={newRankingCategoryName}
+                          onChange={(event) => setNewRankingCategoryName(event.target.value)}
+                          placeholder="Ex: Now Nights"
+                          autoFocus
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter") return;
+                            event.preventDefault();
+                            addRankingCategory();
+                          }}
+                        />
+                      </div>
+                      <DialogFooter>
+                        <Button type="button" variant="secondary" onClick={() => setIsAddCategoryDialogOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button type="button" onClick={addRankingCategory}>
+                          OK
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                   <FormDescription>
                     Ao remover uma categoria, os pontos dessa categoria deixam de existir no ranking.
                   </FormDescription>
@@ -1415,6 +1461,7 @@ export default function Settings() {
                     if (settings) {
                       const resetCategories = parseLineListSetting(settings.nonstopCategories, ["Non Stop"]);
                       setRankingCategoriesDraft(resetCategories);
+                      setNewRankingCategoryName("");
                       form.reset({
                         clubName: settings.clubName,
                         primaryColor: settings.primaryColor,

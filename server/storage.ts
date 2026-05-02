@@ -187,6 +187,38 @@ export interface IStorage {
   setUserPassword(id: number, hashedPassword: string): Promise<AuthorizedUser>;
 }
 
+const RANKING_PARTICIPATION_POINTS = 2;
+const RANKING_MAX_WIN_POINTS_PER_EVENT = 15;
+const RANKING_DEFAULT_ROUND_WIN_POINTS = 3;
+const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
+const RANKING_HISTORY_SEASONS_TO_KEEP = 2;
+const RANKING_ALL_CATEGORIES_TOKEN = "__all__";
+
+export function resolveNonstopRoundWinPoints(nonstopCourts?: number | null, nonstopRounds?: number | null): number {
+  const courts = Number.isFinite(nonstopCourts) ? Math.max(1, Number(nonstopCourts)) : 0;
+  const rounds = Number.isFinite(nonstopRounds) ? Math.max(1, Number(nonstopRounds)) : 0;
+
+  if (rounds > 0) {
+    return RANKING_MAX_WIN_POINTS_PER_EVENT / rounds;
+  }
+
+  if (courts === 2) return 5;
+  if (courts === 3) return 3;
+
+  return RANKING_DEFAULT_ROUND_WIN_POINTS;
+}
+
+export function resolveNonstopStandingsPoints(
+  roundWins: number,
+  nonstopCourts?: number | null,
+  nonstopRounds?: number | null,
+): number {
+  const wins = Number.isFinite(roundWins) ? Math.max(0, Number(roundWins)) : 0;
+  if (wins <= 0) return 0;
+
+  return Math.round(wins * resolveNonstopRoundWinPoints(nonstopCourts, nonstopRounds));
+}
+
 function computeStandings(
   allTeams: Team[],
   allResults: NonstopResult[],
@@ -194,6 +226,7 @@ function computeStandings(
   numRounds: number,
 ) {
   const standings: Record<number, { points: number; gamesWon: number; gamesLost: number; teamId: number; name: string; sequence: string[] }> = {};
+  const roundWins: Record<number, number> = {};
 
   allTeams.forEach((team) => {
     standings[team.id] = {
@@ -204,6 +237,7 @@ function computeStandings(
       name: team.name,
       sequence: [],
     };
+    roundWins[team.id] = 0;
   });
 
   allResults.forEach((result) => {
@@ -219,13 +253,14 @@ function computeStandings(
     const hasPlayed = result.scoreA > 0 || result.scoreB > 0;
     if (!hasPlayed) return;
     if (result.scoreA > result.scoreB) {
-      teamA.points += 3;
+      roundWins[teamA.teamId] += 1;
     } else if (result.scoreB > result.scoreA) {
-      teamB.points += 3;
-    } else {
-      teamA.points += 1;
-      teamB.points += 1;
+      roundWins[teamB.teamId] += 1;
     }
+  });
+
+  Object.values(standings).forEach((teamStandings) => {
+    teamStandings.points = resolveNonstopStandingsPoints(roundWins[teamStandings.teamId] ?? 0, null, numRounds);
   });
 
   allTeams.forEach((team) => {
@@ -268,13 +303,6 @@ function computeStandings(
   });
 }
 
-const RANKING_PARTICIPATION_POINTS = 2;
-const RANKING_MAX_WIN_POINTS_PER_EVENT = 15;
-const RANKING_DEFAULT_ROUND_WIN_POINTS = 3;
-const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
-const RANKING_HISTORY_SEASONS_TO_KEEP = 2;
-const RANKING_ALL_CATEGORIES_TOKEN = "__all__";
-
 export class DatabaseStorage implements IStorage {
   private normalizeRankingPoints(value: number): number {
     return Math.round(value * 1000) / 1000;
@@ -287,21 +315,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   private resolveRoundWinPoints(nonstopCourts?: number | null, nonstopRounds?: number | null): number {
-    const courts = Number.isFinite(nonstopCourts) ? Math.max(1, Number(nonstopCourts)) : 0;
-    const rounds = Number.isFinite(nonstopRounds) ? Math.max(1, Number(nonstopRounds)) : 0;
-
-    // Regra geral: se vencer todas as rondas do evento, soma sempre 15 pontos por vitórias.
-    if (rounds > 0) {
-      return RANKING_MAX_WIN_POINTS_PER_EVENT / rounds;
-    }
-
-    // Fallback para eventos antigos/incompletos sem rondas.
-    if (courts === 2) return 5;
-    if (courts === 3) {
-      return 3;
-    }
-
-    return RANKING_DEFAULT_ROUND_WIN_POINTS;
+    return resolveNonstopRoundWinPoints(nonstopCourts, nonstopRounds);
   }
 
   private getLisbonYear(dateLike: Date | string | null | undefined): number {

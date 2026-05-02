@@ -1,6 +1,6 @@
 import express, { type Express, type Request, type RequestHandler, type Response } from "express";
 import type { Server } from "http";
-import { createLisbonDateTime, getLisbonDateInput, getLisbonTimeInput, storage } from "./storage.js";
+import { createLisbonDateTime, getLisbonDateInput, getLisbonTimeInput, resolveNonstopStandingsPoints, storage } from "./storage.js";
 import { api } from "../shared/routes.js";
 import { insertTeamSchema, insertNonstopResultSchema, createAuthorizedUserRequestSchema, loginSchema, changePasswordSchema, rankingImportSchema } from "../shared/schema.js";
 import { z } from "zod";
@@ -1076,9 +1076,11 @@ export async function registerRoutes(
     const numRounds = eventId ? Math.max(1, actualNumRounds || 1) : (settings?.nonstopRounds || 5);
     
     const standings: Record<number, { points: number; gamesWon: number; gamesLost: number; teamId: number; name: string; sequence: string[] }> = {};
+    const roundWins: Record<number, number> = {};
     
     teams.forEach(team => {
       standings[team.id] = { points: 0, gamesWon: 0, gamesLost: 0, teamId: team.id, name: team.name, sequence: [] };
+      roundWins[team.id] = 0;
     });
 
     results.forEach(result => {
@@ -1095,16 +1097,17 @@ export async function registerRoutes(
           const hasPlayed = result.scoreA > 0 || result.scoreB > 0;
           if (hasPlayed) {
             if (result.scoreA > result.scoreB) {
-              teamA.points += 3;
+              roundWins[teamA.teamId] += 1;
             } else if (result.scoreB > result.scoreA) {
-              teamB.points += 3;
-            } else {
-              teamA.points += 1;
-              teamB.points += 1;
+              roundWins[teamB.teamId] += 1;
             }
           }
         }
       }
+    });
+
+    Object.values(standings).forEach((teamStandings) => {
+      teamStandings.points = resolveNonstopStandingsPoints(roundWins[teamStandings.teamId] ?? 0, settings?.nonstopCourts, numRounds);
     });
 
     teams.forEach(team => {
@@ -1165,7 +1168,7 @@ export async function registerRoutes(
       const row: Record<string, any> = {
         "Posição": index + 1,
         "Dupla": s.name,
-        "Pontos": s.points,
+        "Pontos": Number(s.points.toFixed(3)),
         "JG": s.gamesWon,
         "JP": s.gamesLost,
         "Dif.": s.gamesWon - s.gamesLost

@@ -59,6 +59,28 @@ type NavigatorWithWakeLock = Navigator & {
   };
 };
 const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
+const NONSTOP_MAX_WIN_POINTS_PER_EVENT = 15;
+
+const formatPoints = (value: number) => (
+  Number.isInteger(value)
+    ? String(value)
+    : value.toLocaleString("pt-PT", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 3,
+    })
+);
+
+function resolveNonstopRoundWinPoints(nonstopRounds?: number | null) {
+  const rounds = Number.isFinite(nonstopRounds) ? Math.max(1, Number(nonstopRounds)) : 1;
+  return NONSTOP_MAX_WIN_POINTS_PER_EVENT / rounds;
+}
+
+function resolveNonstopStandingsPoints(roundWins: number, nonstopRounds?: number | null) {
+  const wins = Number.isFinite(roundWins) ? Math.max(0, Number(roundWins)) : 0;
+  if (wins <= 0) return 0;
+
+  return Math.round(wins * resolveNonstopRoundWinPoints(nonstopRounds));
+}
 
 function getConfiguredDuration(
   soundType: string,
@@ -1644,9 +1666,11 @@ export default function Nonstop() {
     if (!teams || !results) return [];
     
     const standings: Record<number, { points: number; gamesWon: number; gamesLost: number; teamId: number; name: string; sequence: string[] }> = {};
+    const roundWins: Record<number, number> = {};
     
     teams.forEach(team => {
       standings[team.id] = { points: 0, gamesWon: 0, gamesLost: 0, teamId: team.id, name: team.name, sequence: [] };
+      roundWins[team.id] = 0;
     });
 
     results?.forEach(result => {
@@ -1663,16 +1687,17 @@ export default function Nonstop() {
           const hasPlayed = result.scoreA > 0 || result.scoreB > 0;
           if (hasPlayed) {
             if (result.scoreA > result.scoreB) {
-              teamA.points += 3;
+              roundWins[teamA.teamId] += 1;
             } else if (result.scoreB > result.scoreA) {
-              teamB.points += 3;
-            } else {
-              teamA.points += 1;
-              teamB.points += 1;
+              roundWins[teamB.teamId] += 1;
             }
           }
         }
       }
+    });
+
+    Object.values(standings).forEach((teamStandings) => {
+      teamStandings.points = resolveNonstopStandingsPoints(roundWins[teamStandings.teamId] ?? 0, displayNumRounds);
     });
 
     // Calculate sequences
@@ -2402,7 +2427,7 @@ export default function Nonstop() {
                       <TableCell className={cn("font-np-num text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesWon}</TableCell>
                       <TableCell className={cn("font-np-num text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesLost}</TableCell>
                       <TableCell className={cn("font-np-num text-center text-[11px] border-l w-12 py-1", isPresentationMode && "text-[9px] w-11 py-0")}>{s.gamesWon - s.gamesLost}</TableCell>
-                      <TableCell className={cn("font-np-num text-center text-[11px] font-bold border-l bg-slate-50 w-16 py-1", isPresentationMode && "text-[9px] w-14 py-0")}>{s.points}</TableCell>
+                      <TableCell className={cn("font-np-num text-center text-[11px] font-bold border-l bg-slate-50 w-16 py-1", isPresentationMode && "text-[9px] w-14 py-0")}>{formatPoints(s.points)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

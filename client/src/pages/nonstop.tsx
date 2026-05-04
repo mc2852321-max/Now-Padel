@@ -268,7 +268,7 @@ export default function Nonstop() {
   const lastQueuedSoundRef = useRef<{ key: string; type: TimerSound; at: number } | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const airHornAudioRef = useRef<HTMLAudioElement | null>(null);
-  const lastBoundarySoundKeyRef = useRef<string | null>(null);
+  const lastBoundarySoundRef = useRef<{ id: string; at: number } | null>(null);
   const lastSyncedTimerSnapshotRef = useRef<{
     timerState: TimerState;
     isActive: boolean;
@@ -615,6 +615,20 @@ export default function Nonstop() {
     return 1400;
   };
 
+  const getBoundaryId = (
+    state: TimerState,
+    currentRound: number,
+    phaseEndsAt: number | string | null | undefined,
+  ) => {
+    const phaseTime = typeof phaseEndsAt === "number"
+      ? phaseEndsAt
+      : phaseEndsAt
+        ? new Date(phaseEndsAt).getTime()
+        : 0;
+    const phaseKey = Number.isFinite(phaseTime) ? Math.floor(phaseTime / 1000) : 0;
+    return `${state}:${currentRound}:${phaseKey}`;
+  };
+
   const ensureAudioContext = async () => {
     if (typeof window === "undefined") return null;
     const win = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
@@ -801,6 +815,7 @@ export default function Nonstop() {
     soundTimeoutsRef.current = [];
     soundBusyUntilRef.current = 0;
     lastQueuedSoundRef.current = null;
+    lastBoundarySoundRef.current = null;
   };
 
   const beginPhase = (
@@ -892,6 +907,19 @@ export default function Nonstop() {
 
     if (!transitionSound) return;
 
+    const previousBoundaryId = getBoundaryId(
+      prevSnapshot.timerState,
+      prevSnapshot.round,
+      prevSnapshot.phaseEndsAt,
+    );
+    const lastBoundarySound = lastBoundarySoundRef.current;
+    if (
+      lastBoundarySound?.id === previousBoundaryId &&
+      Date.now() - lastBoundarySound.at < 60000
+    ) {
+      return;
+    }
+
     const phaseKey = nextSnapshot.phaseEndsAt
       ? Math.floor(new Date(nextSnapshot.phaseEndsAt).getTime() / 1000)
       : 0;
@@ -917,7 +945,8 @@ export default function Nonstop() {
     if (timerState === "warmup") {
       fallbackSound = "start-game";
     } else if (timerState === "game" && round < totalRounds) {
-      fallbackSound = "end-game";
+      const hasRestBetweenRounds = Math.max(0, settings?.restTime ?? 2) > 0;
+      fallbackSound = hasRestBetweenRounds ? "end-game" : "start-game";
     } else if (timerState === "game" && round >= totalRounds) {
       fallbackSound = "final";
     } else if (timerState === "rest" && round < totalRounds) {
@@ -926,13 +955,18 @@ export default function Nonstop() {
 
     if (!fallbackSound) return;
 
-    const phaseKey = phaseEndAtRef.current ? Math.floor(phaseEndAtRef.current / 1000) : 0;
-    const boundaryKey = `boundary:${fallbackSound}:${timerState}:${round}:${phaseKey}`;
-    if (lastBoundarySoundKeyRef.current === boundaryKey) return;
-    lastBoundarySoundKeyRef.current = boundaryKey;
+    const boundaryId = getBoundaryId(timerState, round, phaseEndAtRef.current);
+    const lastBoundarySound = lastBoundarySoundRef.current;
+    if (
+      lastBoundarySound?.id === boundaryId &&
+      Date.now() - lastBoundarySound.at < 60000
+    ) {
+      return;
+    }
+    lastBoundarySoundRef.current = { id: boundaryId, at: Date.now() };
 
-    playSound(fallbackSound, boundaryKey);
-  }, [isActive, timeLeft, timerState, round, totalRounds, readOnlyMode]);
+    playSound(fallbackSound, `boundary:${fallbackSound}:${boundaryId}`);
+  }, [isActive, timeLeft, timerState, round, totalRounds, readOnlyMode, settings?.restTime]);
 
   useEffect(() => {
     if (readOnlyMode) {

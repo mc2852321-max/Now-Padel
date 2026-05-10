@@ -60,6 +60,8 @@ type NavigatorWithWakeLock = Navigator & {
 };
 const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
 const NONSTOP_MAX_WIN_POINTS_PER_EVENT = 15;
+const SOUND_DEDUPE_TTL_MS = 2 * 60 * 1000;
+const SOUND_LOCK_PREFIX = "now-padel:nonstop:sound:";
 
 const formatPoints = (value: number) => (
   Number.isInteger(value)
@@ -89,6 +91,27 @@ function getConfiguredDuration(
   const fallback = Math.max(1, settings?.airHornDuration || 5);
   const configured = Math.max(1, settings?.soundDurationSeconds || fallback);
   return soundType === (settings?.soundDurationTarget || "air-horn") ? configured : null;
+}
+
+function createSoundTabId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function readStoredSoundLock(raw: string | null) {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as { at?: unknown };
+    const at = Number(parsed.at);
+    return Number.isFinite(at) ? at : null;
+  } catch {
+    const at = Number(raw);
+    return Number.isFinite(at) ? at : null;
+  }
 }
 
 function normalizeTeamName(name: string) {
@@ -269,6 +292,9 @@ export default function Nonstop() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const airHornAudioRef = useRef<HTMLAudioElement | null>(null);
   const lastBoundarySoundRef = useRef<{ id: string; at: number } | null>(null);
+  const playedSoundEventsRef = useRef<Map<string, number>>(new Map());
+  const soundTabIdRef = useRef(createSoundTabId());
+  const lastSoundLockCleanupRef = useRef(0);
   const lastSyncedTimerSnapshotRef = useRef<{
     timerState: TimerState;
     isActive: boolean;
@@ -629,6 +655,73 @@ export default function Nonstop() {
     return `${state}:${currentRound}:${phaseKey}`;
   };
 
+  const rememberBoundarySound = (boundaryId: string, at = Date.now()) => {
+    lastBoundarySoundRef.current = { id: boundaryId, at };
+  };
+
+  const hasRecentBoundarySound = (boundaryId: string, now = Date.now()) => {
+    const lastBoundarySound = lastBoundarySoundRef.current;
+    return Boolean(
+      lastBoundarySound?.id === boundaryId &&
+        now - lastBoundarySound.at < SOUND_DEDUPE_TTL_MS,
+    );
+  };
+
+  const cleanupStoredSoundLocks = (now: number) => {
+    if (typeof window === "undefined" || now - lastSoundLockCleanupRef.current < 60000) return;
+    lastSoundLockCleanupRef.current = now;
+
+    try {
+      const storage = window.localStorage;
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i);
+        if (!key?.startsWith(SOUND_LOCK_PREFIX)) continue;
+        const lockedAt = readStoredSoundLock(storage.getItem(key));
+        if (!lockedAt || now - lockedAt > SOUND_DEDUPE_TTL_MS) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((key) => storage.removeItem(key));
+    } catch {
+      // localStorage can be unavailable in private or restricted browsing modes.
+    }
+  };
+
+  const claimSoundEvent = (eventId: string, now = Date.now()) => {
+    playedSoundEventsRef.current.forEach((at, storedEventId) => {
+      if (now - at > SOUND_DEDUPE_TTL_MS) {
+        playedSoundEventsRef.current.delete(storedEventId);
+      }
+    });
+
+    const lastPlayedAt = playedSoundEventsRef.current.get(eventId);
+    if (lastPlayedAt && now - lastPlayedAt < SOUND_DEDUPE_TTL_MS) {
+      return false;
+    }
+
+    cleanupStoredSoundLocks(now);
+
+    if (typeof window !== "undefined") {
+      try {
+        const storageKey = `${SOUND_LOCK_PREFIX}${eventId}`;
+        const storedAt = readStoredSoundLock(window.localStorage.getItem(storageKey));
+        if (storedAt && now - storedAt < SOUND_DEDUPE_TTL_MS) {
+          return false;
+        }
+        window.localStorage.setItem(
+          storageKey,
+          JSON.stringify({ at: now, tabId: soundTabIdRef.current }),
+        );
+      } catch {
+        // In-memory dedupe still protects the active tab if localStorage is blocked.
+      }
+    }
+
+    playedSoundEventsRef.current.set(eventId, now);
+    return true;
+  };
+
   const ensureAudioContext = async () => {
     if (typeof window === "undefined") return null;
     const win = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
@@ -692,19 +785,25 @@ export default function Nonstop() {
     const soundType = resolveSoundType(type);
     const now = Date.now();
     const dedupeKey = dedupeKeyOverride || `${type}:${timerState}:${round}`;
+    const durationMs = getSoundDurationMs(soundType);
+    const sameTypeDedupeMs = Math.max(4000, durationMs + 1500);
     const lastQueuedSound = lastQueuedSoundRef.current;
     if (
       lastQueuedSound &&
       (
         (lastQueuedSound.key === dedupeKey && now - lastQueuedSound.at < 10000) ||
-        (lastQueuedSound.type === type && now - lastQueuedSound.at < 4000)
+        (lastQueuedSound.type === type && now - lastQueuedSound.at < sameTypeDedupeMs)
       )
     ) {
       return;
     }
+
+    if (!claimSoundEvent(dedupeKey, now)) {
+      return;
+    }
+
     lastQueuedSoundRef.current = { key: dedupeKey, type, at: now };
 
-    const durationMs = getSoundDurationMs(soundType);
     const scheduledStart = Math.max(now, soundBusyUntilRef.current);
     const queueGapMs = 120;
     soundBusyUntilRef.current = scheduledStart + durationMs + queueGapMs;
@@ -816,6 +915,7 @@ export default function Nonstop() {
     soundBusyUntilRef.current = 0;
     lastQueuedSoundRef.current = null;
     lastBoundarySoundRef.current = null;
+    playedSoundEventsRef.current.clear();
   };
 
   const beginPhase = (
@@ -825,6 +925,9 @@ export default function Nonstop() {
     isActiveOverride: boolean = isActive,
     roundOverride: number = round,
   ) => {
+    const previousBoundaryId = isActive && timerState !== "idle"
+      ? getBoundaryId(timerState, round, phaseEndAtRef.current)
+      : null;
     const safeDuration = Math.max(0, Math.floor(durationSeconds));
     const nextPhaseEndAt = safeDuration > 0 ? Date.now() + safeDuration * 1000 : null;
     setIsActive(isActiveOverride);
@@ -841,7 +944,13 @@ export default function Nonstop() {
     });
     if (sound) {
       const phaseKey = nextPhaseEndAt ? Math.floor(nextPhaseEndAt / 1000) : 0;
-      playSound(sound, `sync:${sound}:${nextState}:${roundOverride}:${phaseKey}`);
+      const soundEventId = previousBoundaryId
+        ? `boundary:${sound}:${previousBoundaryId}`
+        : `manual:${sound}:${nextState}:${roundOverride}:${phaseKey}`;
+      if (previousBoundaryId) {
+        rememberBoundarySound(previousBoundaryId);
+      }
+      playSound(sound, soundEventId);
     }
   };
 
@@ -912,21 +1021,15 @@ export default function Nonstop() {
       prevSnapshot.round,
       prevSnapshot.phaseEndsAt,
     );
-    const lastBoundarySound = lastBoundarySoundRef.current;
-    if (
-      lastBoundarySound?.id === previousBoundaryId &&
-      Date.now() - lastBoundarySound.at < 60000
-    ) {
+    const now = Date.now();
+    if (hasRecentBoundarySound(previousBoundaryId, now)) {
       return;
     }
-
-    const phaseKey = nextSnapshot.phaseEndsAt
-      ? Math.floor(new Date(nextSnapshot.phaseEndsAt).getTime() / 1000)
-      : 0;
+    rememberBoundarySound(previousBoundaryId, now);
 
     playSound(
       transitionSound,
-      `sync:${transitionSound}:${nextSnapshot.timerState}:${nextSnapshot.round}:${phaseKey}`,
+      `boundary:${transitionSound}:${previousBoundaryId}`,
     );
   }, [
     syncedTimer?.updatedAt,
@@ -956,14 +1059,11 @@ export default function Nonstop() {
     if (!fallbackSound) return;
 
     const boundaryId = getBoundaryId(timerState, round, phaseEndAtRef.current);
-    const lastBoundarySound = lastBoundarySoundRef.current;
-    if (
-      lastBoundarySound?.id === boundaryId &&
-      Date.now() - lastBoundarySound.at < 60000
-    ) {
+    const now = Date.now();
+    if (hasRecentBoundarySound(boundaryId, now)) {
       return;
     }
-    lastBoundarySoundRef.current = { id: boundaryId, at: Date.now() };
+    rememberBoundarySound(boundaryId, now);
 
     playSound(fallbackSound, `boundary:${fallbackSound}:${boundaryId}`);
   }, [isActive, timeLeft, timerState, round, totalRounds, readOnlyMode, settings?.restTime]);

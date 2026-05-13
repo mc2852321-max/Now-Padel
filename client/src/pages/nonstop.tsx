@@ -66,8 +66,6 @@ const NONSTOP_EVENT_POLL_MS = 30_000;
 const NONSTOP_LIVE_DATA_POLL_MS = 15_000;
 const NONSTOP_SLOW_POLL_MS = 60_000;
 const TIMER_ACTIVE_POLL_MS = 10_000;
-const TIMER_BOUNDARY_POLL_MS = 1_000;
-const TIMER_BOUNDARY_SYNC_SECONDS = 15;
 
 const formatPoints = (value: number) => (
   Number.isInteger(value)
@@ -280,11 +278,9 @@ export default function Nonstop() {
     ? false
     : readOnlyMode
       ? NONSTOP_SLOW_POLL_MS
-      : isActive && timeLeft <= TIMER_BOUNDARY_SYNC_SECONDS
-        ? TIMER_BOUNDARY_POLL_MS
-        : isActive
-          ? TIMER_ACTIVE_POLL_MS
-          : NONSTOP_SLOW_POLL_MS;
+      : isActive
+        ? TIMER_ACTIVE_POLL_MS
+        : NONSTOP_SLOW_POLL_MS;
 
   const { data: syncedTimer } = useQuery<SyncedTimer>({
     queryKey: [timerQueryKey],

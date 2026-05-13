@@ -62,6 +62,12 @@ const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
 const NONSTOP_MAX_WIN_POINTS_PER_EVENT = 15;
 const SOUND_DEDUPE_TTL_MS = 2 * 60 * 1000;
 const SOUND_LOCK_PREFIX = "now-padel:nonstop:sound:";
+const NONSTOP_EVENT_POLL_MS = 30_000;
+const NONSTOP_LIVE_DATA_POLL_MS = 15_000;
+const NONSTOP_SLOW_POLL_MS = 60_000;
+const TIMER_ACTIVE_POLL_MS = 10_000;
+const TIMER_BOUNDARY_POLL_MS = 1_000;
+const TIMER_BOUNDARY_SYNC_SECONDS = 15;
 
 const formatPoints = (value: number) => (
   Number.isInteger(value)
@@ -161,16 +167,21 @@ export default function Nonstop() {
   const [selectedHistoryEventId, setSelectedHistoryEventId] = useState<number | null>(null);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] = useState(false);
+  const [timerState, setTimerState] = useState<TimerState>('idle');
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [isActive, setIsActive] = useState(false);
+  const [round, setRound] = useState(1);
+  const [isPresentationMode, setIsPresentationMode] = useState(false);
 
   const { data: currentEvent } = useQuery<NonstopEventSummary>({
     queryKey: ["/api/nonstop/current"],
-    refetchInterval: 3000,
+    refetchInterval: NONSTOP_EVENT_POLL_MS,
     refetchOnWindowFocus: true,
   });
 
   const { data: events = [] } = useQuery<NonstopEventSummary[]>({
     queryKey: ["/api/nonstop/events"],
-    refetchInterval: 5000,
+    refetchInterval: NONSTOP_SLOW_POLL_MS,
     refetchOnWindowFocus: true,
   });
 
@@ -183,7 +194,7 @@ export default function Nonstop() {
 
   const { data: settings } = useQuery<Settings>({
     queryKey: ["/api/settings"],
-    refetchInterval: 3000,
+    refetchInterval: NONSTOP_SLOW_POLL_MS,
     refetchOnWindowFocus: true,
   });
   const configuredCategories = useMemo(
@@ -194,7 +205,7 @@ export default function Nonstop() {
   const playersQuery = useQuery<PlayersPageResponse>({
     queryKey: ["/api/players", "all"],
     queryFn: fetchAllPlayers,
-    refetchInterval: 10000,
+    refetchInterval: NONSTOP_SLOW_POLL_MS,
     refetchOnWindowFocus: true,
   });
   const playersPage = playersQuery.data;
@@ -248,7 +259,7 @@ export default function Nonstop() {
 
   const { data: teams } = useQuery<Team[]>({
     queryKey: [teamsQueryKey],
-    refetchInterval: 3000,
+    refetchInterval: NONSTOP_LIVE_DATA_POLL_MS,
     refetchOnWindowFocus: true,
   });
 
@@ -258,29 +269,33 @@ export default function Nonstop() {
 
   const { data: results } = useQuery<NonstopResult[]>({
     queryKey: [resultsQueryKey],
-    refetchInterval: 3000,
+    refetchInterval: NONSTOP_LIVE_DATA_POLL_MS,
     refetchOnWindowFocus: true,
   });
 
   const timerQueryKey = readOnlyMode && selectedHistoryEventId
     ? `/api/nonstop/timer?eventId=${selectedHistoryEventId}`
     : "/api/nonstop/timer";
+  const timerRefetchInterval = isPresentationMode
+    ? false
+    : readOnlyMode
+      ? NONSTOP_SLOW_POLL_MS
+      : isActive && timeLeft <= TIMER_BOUNDARY_SYNC_SECONDS
+        ? TIMER_BOUNDARY_POLL_MS
+        : isActive
+          ? TIMER_ACTIVE_POLL_MS
+          : NONSTOP_SLOW_POLL_MS;
 
   const { data: syncedTimer } = useQuery<SyncedTimer>({
     queryKey: [timerQueryKey],
-    refetchInterval: 1000,
-    refetchIntervalInBackground: true,
+    enabled: !isPresentationMode,
+    refetchInterval: timerRefetchInterval,
     refetchOnWindowFocus: true,
   });
 
-  const [timerState, setTimerState] = useState<TimerState>('idle');
-  const [timeLeft, setTimeLeft] = useState(0);
-  const [isActive, setIsActive] = useState(false);
-  const [round, setRound] = useState(1);
   const [isTeamDialogOpen, setIsTeamDialogOpen] = useState(false);
   const [isManageTeamsOpen, setIsManageTeamsOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
-  const [isPresentationMode, setIsPresentationMode] = useState(false);
   const [isDesktopPresentationViewport, setIsDesktopPresentationViewport] = useState(false);
   const [confirmStopPresentation, setConfirmStopPresentation] = useState(false);
   const phaseEndAtRef = useRef<number | null>(null);
@@ -457,11 +472,12 @@ export default function Nonstop() {
       phaseEndsAt: number | null;
     }
   ) => {
-    if (readOnlyMode) return;
+    if (readOnlyMode || isPresentationMode) return;
     syncTimerMutation.mutate(payload);
   };
 
   const enterPresentationMode = async () => {
+    clearScheduledSounds();
     setConfirmStopPresentation(false);
     setIsPresentationMode(true);
     const el = presentationContainerRef.current;
@@ -955,7 +971,7 @@ export default function Nonstop() {
   };
 
   useEffect(() => {
-    if (!syncedTimer || readOnlyMode) return;
+    if (!syncedTimer || readOnlyMode || isPresentationMode) return;
 
     const nextSnapshot = {
       timerState: syncedTimer.timerState as TimerState,
@@ -1037,12 +1053,13 @@ export default function Nonstop() {
     syncedTimer?.isActive,
     syncedTimer?.round,
     syncedTimer?.phaseEndsAt,
+    isPresentationMode,
     readOnlyMode,
     totalRounds,
   ]);
 
   useEffect(() => {
-    if (!isActive || timeLeft > 0 || readOnlyMode) return;
+    if (!isActive || timeLeft > 0 || readOnlyMode || isPresentationMode) return;
 
     let fallbackSound: TimerSound | null = null;
     if (timerState === "warmup") {
@@ -1066,7 +1083,7 @@ export default function Nonstop() {
     rememberBoundarySound(boundaryId, now);
 
     playSound(fallbackSound, `boundary:${fallbackSound}:${boundaryId}`);
-  }, [isActive, timeLeft, timerState, round, totalRounds, readOnlyMode, settings?.restTime]);
+  }, [isActive, timeLeft, timerState, round, totalRounds, readOnlyMode, isPresentationMode, settings?.restTime]);
 
   useEffect(() => {
     if (readOnlyMode) {
@@ -2019,11 +2036,12 @@ export default function Nonstop() {
               </Badge>
             ) : null}
           </div>
-          <Card className={cn(
-            "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[420px] sm:ml-auto md:mr-[4.5rem]",
-            isPresentationMode && "gap-2 px-3 py-1.5 sm:min-w-[360px] md:mr-0 max-[900px]:gap-1.5 max-[900px]:px-2.5 max-[900px]:py-1",
-            isActive ? "bg-orange-950 border-orange-500" : "bg-slate-900 border-slate-800"
-          )}>
+          {!isPresentationMode ? (
+            <Card className={cn(
+              "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[420px] sm:ml-auto md:mr-[4.5rem]",
+              isPresentationMode && "gap-2 px-3 py-1.5 sm:min-w-[360px] md:mr-0 max-[900px]:gap-1.5 max-[900px]:px-2.5 max-[900px]:py-1",
+              isActive ? "bg-orange-950 border-orange-500" : "bg-slate-900 border-slate-800"
+            )}>
             <div className={cn("flex flex-col w-[110px]", isPresentationMode && "w-[96px] max-[900px]:w-[88px]")}>
               <span className={cn("text-[10px] uppercase tracking-widest text-orange-500 font-bold", isPresentationMode && "text-[9px] tracking-wider max-[900px]:text-[8px]")}>
                 {timerState === 'idle'
@@ -2204,7 +2222,8 @@ export default function Nonstop() {
                 </Button>
               </Link>
             </div>
-          </Card>
+            </Card>
+          ) : null}
 
           <Button
             variant={isPresentationMode ? "default" : "outline"}

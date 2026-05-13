@@ -14,6 +14,8 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { fetchAllPlayers, type PlayersPageResponse } from "@/lib/players";
 
+const RANKING_POLL_MS = 60_000;
+
 type RankingItem = {
   position: number;
   playerId: number;
@@ -162,7 +164,7 @@ export default function Ranking() {
       }
       return res.json();
     },
-    refetchInterval: 3000,
+    refetchInterval: RANKING_POLL_MS,
     refetchOnWindowFocus: true,
   });
   const rankingHistoryCategory = isGeneralCategorySelected
@@ -185,14 +187,14 @@ export default function Ranking() {
       }
       return res.json();
     },
-    refetchInterval: 5000,
+    refetchInterval: RANKING_POLL_MS,
     refetchOnWindowFocus: true,
   });
 
   const playersQuery = useQuery<PlayersPageResponse>({
     queryKey: ["/api/players", "all"],
     queryFn: fetchAllPlayers,
-    refetchInterval: 15000,
+    refetchInterval: RANKING_POLL_MS,
     refetchOnWindowFocus: true,
   });
   const playersPage = playersQuery.data;

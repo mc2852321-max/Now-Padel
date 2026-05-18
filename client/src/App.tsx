@@ -1,5 +1,5 @@
 import { Switch, Route } from "wouter";
-import { queryClient } from "./lib/queryClient";
+import { AUTH_EXPIRED_EVENT, AUTH_RESTORED_EVENT, queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 
 const NotFoundPage = lazy(() => import("@/pages/not-found"));
 const PlayersPage = lazy(() => import("@/pages/players"));
@@ -150,6 +150,69 @@ function LoginPage() {
   );
 }
 
+function ReauthOverlay({ onSuccess }: { onSuccess: () => void }) {
+  const { login, isLoggingIn, loginError } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    try {
+      await login({ email, password });
+      onSuccess();
+    } catch (err: any) {
+      setError(err.message || "Erro ao fazer login");
+    }
+  };
+
+  return (
+    <div className="fixed bottom-4 right-4 z-[100] w-[min(420px,calc(100vw-2rem))]">
+      <Card className="border-2 border-orange-500 bg-white shadow-2xl">
+        <CardHeader className="space-y-1 pb-3">
+          <CardTitle className="text-lg">Sessão expirada</CardTitle>
+          <CardDescription>
+            O cronómetro continua no ecrã. Inicia sessão para voltar a gravar e sincronizar.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            {(error || loginError) && (
+              <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{error || loginError}</span>
+              </div>
+            )}
+            <Input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+            <Input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+            <Button
+              type="submit"
+              className="w-full gap-2 bg-orange-600 hover:bg-orange-500"
+              disabled={isLoggingIn}
+            >
+              {isLoggingIn ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+              {isLoggingIn ? "A entrar..." : "Retomar sessão"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function LoadingScreen() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-orange-50">
@@ -163,10 +226,47 @@ function LoadingScreen() {
 
 function App() {
   const { user, isLoading, isAuthenticated, logout } = useAuth();
+  const [reauthRequired, setReauthRequired] = useState(false);
   const { data: settings } = useQuery<SettingsType>({
     queryKey: ["/api/settings"],
     enabled: isAuthenticated
   });
+
+  useEffect(() => {
+    const handleExpired = () => setReauthRequired(true);
+    const handleRestored = () => setReauthRequired(false);
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired);
+    window.addEventListener(AUTH_RESTORED_EVENT, handleRestored);
+    return () => {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired);
+      window.removeEventListener(AUTH_RESTORED_EVENT, handleRestored);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setReauthRequired(false);
+      return;
+    }
+
+    const heartbeat = async () => {
+      try {
+        const response = await fetch("/api/auth/user", {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (response.status === 401) {
+          window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+        }
+      } catch {
+        // Network failures should not interrupt an event that is already running.
+      }
+    };
+
+    const interval = window.setInterval(heartbeat, 4 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [isAuthenticated]);
 
   if (isLoading) {
     return <LoadingScreen />;
@@ -271,6 +371,7 @@ function App() {
           </div>
         </div>
       </SidebarProvider>
+      {reauthRequired ? <ReauthOverlay onSuccess={() => setReauthRequired(false)} /> : null}
       <Toaster />
     </TooltipProvider>
   );

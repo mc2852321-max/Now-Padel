@@ -101,6 +101,10 @@ function normalizeCategoryName(value: unknown): string | undefined {
   return cleaned.slice(0, 60).trim() || undefined;
 }
 
+function getSessionUserEmail(req: Request): string | null {
+  return (req.session as any)?.userEmail ?? null;
+}
+
 function parseConfiguredNonstopCategories(raw: unknown): string[] {
   if (typeof raw !== "string" || !raw.trim()) return [DEFAULT_NONSTOP_CATEGORY];
 
@@ -340,6 +344,7 @@ export async function registerRoutes(
     secret: configuredSessionSecret || "dev-session-secret-change-me",
     resave: false,
     saveUninitialized: false,
+    rolling: true,
     cookie: {
       secure: IS_PRODUCTION,
       httpOnly: true,
@@ -676,11 +681,24 @@ export async function registerRoutes(
   app.post("/api/nonstop/finalize-and-start", isAuthenticated, async (req, res) => {
     try {
       const input = finalizeAndStartSchema.parse(req.body ?? {});
-      const userEmail = (req.session as any)?.userEmail ?? null;
+      const userEmail = getSessionUserEmail(req);
+      const activeEvent = await storage.getCurrentNonstopEvent();
+      const [eventTeams, eventResults] = await Promise.all([
+        storage.getTeams(activeEvent.id),
+        storage.getResults(activeEvent.id),
+      ]);
       const result = await storage.finalizeAndStartNonstop({
         label: input.label,
         userEmail,
       });
+      console.info("[nonstop/finalize-and-start]", JSON.stringify({
+        userEmail,
+        completedEventId: result.completedEventId,
+        newEventId: result.newEvent.id,
+        teams: eventTeams.length,
+        results: eventResults.length,
+        scoredResults: eventResults.filter((row) => row.scoreA > 0 || row.scoreB > 0).length,
+      }));
       res.json({ success: true, ...result });
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -779,7 +797,27 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Ronda e campo devem ser maiores que zero." });
       }
 
+      const activeEvent = await storage.getCurrentNonstopEvent();
+      const existingResults = await storage.getResults(activeEvent.id);
+      const previous = existingResults.find((row) =>
+        row.round === (input.round ?? 1) &&
+        row.court === (input.court ?? 1)
+      );
       const result = await storage.createOrUpdateResult(input);
+      console.info("[results/upsert]", JSON.stringify({
+        userEmail: getSessionUserEmail(req),
+        eventId: activeEvent.id,
+        resultId: result.id,
+        round: result.round,
+        court: result.court,
+        teamAId: result.teamAId,
+        teamBId: result.teamBId,
+        previousScoreA: previous?.scoreA ?? null,
+        previousScoreB: previous?.scoreB ?? null,
+        scoreA: result.scoreA,
+        scoreB: result.scoreB,
+        zeroedExistingScore: Boolean(previous && (previous.scoreA > 0 || previous.scoreB > 0) && result.scoreA === 0 && result.scoreB === 0),
+      }));
       res.status(201).json(result);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -799,8 +837,16 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/results/clear", isAuthenticated, async (_req, res) => {
+  app.post("/api/results/clear", isAuthenticated, async (req, res) => {
+    const activeEvent = await storage.getCurrentNonstopEvent();
+    const existingResults = await storage.getResults(activeEvent.id);
     await storage.clearResults();
+    console.warn("[results/clear]", JSON.stringify({
+      userEmail: getSessionUserEmail(req),
+      eventId: activeEvent.id,
+      clearedResults: existingResults.length,
+      scoredResults: existingResults.filter((row) => row.scoreA > 0 || row.scoreB > 0).length,
+    }));
     res.json({ success: true });
   });
 

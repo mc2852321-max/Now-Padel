@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { AUTH_RESTORED_EVENT } from "@/lib/queryClient";
 
 interface AuthUser {
   id: number;
@@ -65,6 +66,9 @@ export function useAuth() {
   const logoutMutation = useMutation({
     mutationFn: logoutFn,
     onSuccess: () => {
+      queryClient.removeQueries({
+        predicate: (query) => query.queryKey[0] !== "/api/auth/user",
+      });
       queryClient.setQueryData(["/api/auth/user"], null);
     },
   });
@@ -72,7 +76,13 @@ export function useAuth() {
   const loginMutation = useMutation({
     mutationFn: loginFn,
     onSuccess: (user) => {
+      queryClient.removeQueries({
+        predicate: (query) => query.queryKey[0] !== "/api/auth/user",
+      });
       queryClient.setQueryData(["/api/auth/user"], user);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(AUTH_RESTORED_EVENT));
+      }
     },
   });
 

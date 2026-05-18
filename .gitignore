@@ -5,6 +5,8 @@ server/public
 vite.config.ts.*
 *.tar.gz
 .local
+test-results
+playwright-report
 .env*
 !.env.example
 .git

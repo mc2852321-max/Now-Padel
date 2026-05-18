@@ -1,4 +1,16 @@
-import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryFunction } from "@tanstack/react-query";
+
+export const AUTH_EXPIRED_EVENT = "now-padel:auth-expired";
+export const AUTH_RESTORED_EVENT = "now-padel:auth-restored";
+
+export function isUnauthorizedError(error: unknown) {
+  return error instanceof Error && /^401:/.test(error.message);
+}
+
+function notifyAuthExpired() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+}
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -42,6 +54,21 @@ export const getQueryFn: <T>(options: {
   };
 
 export const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      if (query.queryKey[0] === "/api/auth/user") return;
+      if (isUnauthorizedError(error)) {
+        notifyAuthExpired();
+      }
+    },
+  }),
+  mutationCache: new MutationCache({
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        notifyAuthExpired();
+      }
+    },
+  }),
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),

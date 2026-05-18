@@ -8,6 +8,7 @@
     "build": "tsx script/build.ts",
     "start": "node dist/index.cjs",
     "check": "tsc",
+    "test:e2e:nonstop-session": "playwright test tests/e2e/nonstop-session.spec.ts --browser=chromium",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
@@ -83,6 +84,7 @@
     "zod-validation-error": "^3.4.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@replit/vite-plugin-cartographer": "^0.4.4",
     "@replit/vite-plugin-dev-banner": "^0.1.1",
     "@replit/vite-plugin-runtime-error-modal": "^0.0.3",

@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { AUTH_RESTORED_EVENT, apiRequest, isUnauthorizedError, queryClient } from "@/lib/queryClient";
 import { fetchAllPlayers, type PlayersPageResponse } from "@/lib/players";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, History, Save } from "lucide-react";
@@ -66,6 +66,8 @@ const NONSTOP_EVENT_POLL_MS = 30_000;
 const NONSTOP_LIVE_DATA_POLL_MS = 15_000;
 const NONSTOP_SLOW_POLL_MS = 60_000;
 const TIMER_ACTIVE_POLL_MS = 10_000;
+const PENDING_RESULT_SAVES_STORAGE_KEY = "now-padel:nonstop:pending-results";
+const SCORE_DRAFTS_STORAGE_KEY = "now-padel:nonstop:score-drafts";
 
 const formatPoints = (value: number) => (
   Number.isInteger(value)
@@ -306,6 +308,8 @@ export default function Nonstop() {
   const playedSoundEventsRef = useRef<Map<string, number>>(new Map());
   const soundTabIdRef = useRef(createSoundTabId());
   const lastSoundLockCleanupRef = useRef(0);
+  const resultSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const pendingResultSavesRef = useRef<Map<string, any>>(new Map());
   const lastSyncedTimerSnapshotRef = useRef<{
     timerState: TimerState;
     isActive: boolean;
@@ -1352,10 +1356,77 @@ export default function Nonstop() {
     },
   });
 
-  const [scoreDrafts, setScoreDrafts] = useState<Record<string, string>>({});
+  const [scoreDrafts, setScoreDrafts] = useState<Record<string, string>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = window.localStorage.getItem(SCORE_DRAFTS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      return Object.fromEntries(
+        Object.entries(parsed)
+          .filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string"),
+      );
+    } catch {
+      return {};
+    }
+  });
 
   const getScoreKey = (roundNum: number, courtNum: number, field: "A" | "B") =>
     `${roundNum}-${courtNum}-${field}`;
+
+  const getResultKey = (roundNum: number, courtNum: number) =>
+    `${roundNum}-${courtNum}`;
+
+  const persistPendingResultSaves = () => {
+    if (typeof window === "undefined") return;
+    try {
+      const pending = Object.fromEntries(pendingResultSavesRef.current);
+      if (Object.keys(pending).length === 0) {
+        window.localStorage.removeItem(PENDING_RESULT_SAVES_STORAGE_KEY);
+        return;
+      }
+      window.localStorage.setItem(PENDING_RESULT_SAVES_STORAGE_KEY, JSON.stringify(pending));
+    } catch {
+      // Keeping the in-memory queue is still enough while the tab stays open.
+    }
+  };
+
+  const rememberPendingResultSave = (result: any) => {
+    if (!result?.teamAId || !result?.teamBId) return;
+    pendingResultSavesRef.current.set(getResultKey(result.round ?? 1, result.court ?? 1), result);
+    persistPendingResultSaves();
+  };
+
+  const forgetPendingResultSave = (roundNum: number, courtNum: number) => {
+    pendingResultSavesRef.current.delete(getResultKey(roundNum, courtNum));
+    persistPendingResultSaves();
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (Object.keys(scoreDrafts).length === 0) {
+        window.localStorage.removeItem(SCORE_DRAFTS_STORAGE_KEY);
+        return;
+      }
+      window.localStorage.setItem(SCORE_DRAFTS_STORAGE_KEY, JSON.stringify(scoreDrafts));
+    } catch {
+      // Drafts remain in React state while the tab stays open.
+    }
+  }, [scoreDrafts]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(PENDING_RESULT_SAVES_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+      pendingResultSavesRef.current = new Map(Object.entries(parsed));
+    } catch {
+      window.localStorage.removeItem(PENDING_RESULT_SAVES_STORAGE_KEY);
+    }
+  }, []);
 
   const getScoreValue = (
     roundNum: number,
@@ -1367,6 +1438,27 @@ export default function Nonstop() {
     if (scoreDrafts[key] !== undefined) return scoreDrafts[key];
     const baseValue = field === "A" ? matchResult?.scoreA : matchResult?.scoreB;
     return baseValue === null || baseValue === undefined ? "" : String(baseValue);
+  };
+
+  const getDraftScoreNumber = (roundNum: number, courtNum: number, field: "A" | "B") => {
+    const raw = scoreDrafts[getScoreKey(roundNum, courtNum, field)];
+    if (raw === undefined) return undefined;
+
+    const parsed = raw.trim() === "" ? 0 : parseInt(raw, 10);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
+  const getLatestMatchResult = (
+    roundNum: number,
+    courtNum: number,
+    fallback?: NonstopResult,
+  ) => {
+    const cachedResults = queryClient.getQueryData<NonstopResult[]>(["/api/results"]);
+    return (
+      cachedResults?.find((result) => result.round === roundNum && result.court === courtNum) ??
+      results?.find((result) => result.round === roundNum && result.court === courtNum) ??
+      fallback
+    );
   };
 
   const onScoreChange = (roundNum: number, courtNum: number, field: "A" | "B", value: string) => {
@@ -1384,10 +1476,11 @@ export default function Nonstop() {
 
     const parsed = raw.trim() === "" ? 0 : parseInt(raw, 10);
     const safeValue = Number.isNaN(parsed) ? 0 : parsed;
-    const teamAId = matchResult?.teamAId ?? 0;
-    const teamBId = matchResult?.teamBId ?? 0;
+    const latestMatchResult = getLatestMatchResult(roundNum, courtNum, matchResult);
+    const teamAId = latestMatchResult?.teamAId ?? 0;
+    const teamBId = latestMatchResult?.teamBId ?? 0;
     if (!teamAId || !teamBId) return;
-    const currentValue = field === "A" ? (matchResult?.scoreA ?? 0) : (matchResult?.scoreB ?? 0);
+    const currentValue = field === "A" ? (latestMatchResult?.scoreA ?? 0) : (latestMatchResult?.scoreB ?? 0);
 
     if (safeValue === currentValue) {
       setScoreDrafts((prev) => {
@@ -1398,13 +1491,16 @@ export default function Nonstop() {
       return;
     }
 
+    const draftScoreA = getDraftScoreNumber(roundNum, courtNum, "A");
+    const draftScoreB = getDraftScoreNumber(roundNum, courtNum, "B");
+
     updateResultMutation.mutate(
       {
-        ...matchResult,
+        ...latestMatchResult,
         round: roundNum,
         court: courtNum,
-        scoreA: field === "A" ? safeValue : (matchResult?.scoreA ?? 0),
-        scoreB: field === "B" ? safeValue : (matchResult?.scoreB ?? 0),
+        scoreA: field === "A" ? safeValue : (draftScoreA ?? latestMatchResult?.scoreA ?? 0),
+        scoreB: field === "B" ? safeValue : (draftScoreB ?? latestMatchResult?.scoreB ?? 0),
         teamAId,
         teamBId,
       },
@@ -1426,8 +1522,22 @@ export default function Nonstop() {
       if (!data.teamAId || !data.teamBId || data.teamAId < 1 || data.teamBId < 1) {
         return null;
       }
-      const res = await apiRequest("POST", "/api/results", data);
-      return res.json();
+      const resultKey = `${data.round ?? 1}-${data.court ?? 1}`;
+      const previousSave = resultSaveQueueRef.current.get(resultKey) ?? Promise.resolve();
+      const save = previousSave.catch(() => undefined).then(async () => {
+        const res = await apiRequest("POST", "/api/results", data);
+        return res.json();
+      });
+      const queued = save.then(() => undefined, () => undefined);
+      resultSaveQueueRef.current.set(resultKey, queued);
+
+      try {
+        return await save;
+      } finally {
+        if (resultSaveQueueRef.current.get(resultKey) === queued) {
+          resultSaveQueueRef.current.delete(resultKey);
+        }
+      }
     },
     onMutate: async (incoming) => {
       await queryClient.cancelQueries({ queryKey: ["/api/results"] });
@@ -1450,9 +1560,32 @@ export default function Nonstop() {
       if (context?.previous) {
         queryClient.setQueryData(["/api/results"], context.previous);
       }
+      if (isUnauthorizedError(_err)) {
+        rememberPendingResultSave(_incoming);
+        toast({
+          title: "Sessão expirada",
+          description: "Resultado mantido neste dispositivo. Inicia sessão para gravar.",
+          variant: "destructive",
+        });
+      }
     },
     onSuccess: (data) => {
       if (data) {
+        forgetPendingResultSave(data.round, data.court);
+        setScoreDrafts((prev) => {
+          const next = { ...prev };
+          const keyA = getScoreKey(data.round, data.court, "A");
+          const keyB = getScoreKey(data.round, data.court, "B");
+          const draftA = next[keyA];
+          const draftB = next[keyB];
+          if (draftA !== undefined && (draftA.trim() === "" ? 0 : parseInt(draftA, 10)) === data.scoreA) {
+            delete next[keyA];
+          }
+          if (draftB !== undefined && (draftB.trim() === "" ? 0 : parseInt(draftB, 10)) === data.scoreB) {
+            delete next[keyB];
+          }
+          return next;
+        });
         queryClient.setQueryData<NonstopResult[]>(["/api/results"], (current = []) => {
           const idx = current.findIndex((r) => r.round === data.round && r.court === data.court);
           if (idx === -1) return [...current, data];
@@ -1466,6 +1599,43 @@ export default function Nonstop() {
       queryClient.invalidateQueries({ queryKey: ["/api/results"] });
     },
   });
+
+  useEffect(() => {
+    const retryPendingSaves = () => {
+      if (!readOnlyMode && !isPresentationMode) {
+        const phaseEndsAt = isActive
+          ? phaseEndAtRef.current ?? (timeLeft > 0 ? Date.now() + timeLeft * 1000 : null)
+          : null;
+        syncTimer({
+          timerState,
+          isActive,
+          round,
+          timeLeft,
+          phaseEndsAt,
+        });
+      }
+
+      const pending = Array.from(pendingResultSavesRef.current.values());
+      if (pending.length === 0) return;
+
+      pending.forEach((result) => updateResultMutation.mutate(result));
+      toast({
+        title: "Sessão retomada",
+        description: `${pending.length} resultado(s) pendente(s) a gravar.`,
+      });
+    };
+
+    window.addEventListener(AUTH_RESTORED_EVENT, retryPendingSaves);
+    return () => window.removeEventListener(AUTH_RESTORED_EVENT, retryPendingSaves);
+  }, [
+    readOnlyMode,
+    isPresentationMode,
+    isActive,
+    timerState,
+    round,
+    timeLeft,
+    toast,
+  ]);
 
   const finalizeAndStartMutation = useMutation({
     mutationFn: async () => {

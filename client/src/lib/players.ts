@@ -16,6 +16,9 @@ async function fetchPlayersPage(page: number): Promise<PlayersPageResponse> {
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      throw new Error("401: Sessão expirada. Inicia sessão novamente.");
+    }
     throw new Error(`Nao foi possivel carregar jogadores (pagina ${page}).`);
   }
   return res.json();

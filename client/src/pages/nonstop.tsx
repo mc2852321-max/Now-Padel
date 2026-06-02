@@ -276,17 +276,15 @@ export default function Nonstop() {
   const timerQueryKey = readOnlyMode && selectedHistoryEventId
     ? `/api/nonstop/timer?eventId=${selectedHistoryEventId}`
     : "/api/nonstop/timer";
-  const timerRefetchInterval = isPresentationMode
-    ? false
-    : readOnlyMode
-      ? NONSTOP_SLOW_POLL_MS
-      : isActive
-        ? TIMER_ACTIVE_POLL_MS
-        : NONSTOP_SLOW_POLL_MS;
+  const timerRefetchInterval = readOnlyMode
+    ? NONSTOP_SLOW_POLL_MS
+    : isPresentationMode || isActive
+      ? TIMER_ACTIVE_POLL_MS
+      : NONSTOP_SLOW_POLL_MS;
 
   const { data: syncedTimer } = useQuery<SyncedTimer>({
     queryKey: [timerQueryKey],
-    enabled: !isPresentationMode,
+    enabled: !readOnlyMode,
     refetchInterval: timerRefetchInterval,
     refetchOnWindowFocus: true,
   });
@@ -802,27 +800,7 @@ export default function Nonstop() {
     const now = Date.now();
     const dedupeKey = dedupeKeyOverride || `${type}:${timerState}:${round}`;
     const durationMs = getSoundDurationMs(soundType);
-    const sameTypeDedupeMs = Math.max(4000, durationMs + 1500);
-    const lastQueuedSound = lastQueuedSoundRef.current;
-    if (
-      lastQueuedSound &&
-      (
-        (lastQueuedSound.key === dedupeKey && now - lastQueuedSound.at < 10000) ||
-        (lastQueuedSound.type === type && now - lastQueuedSound.at < sameTypeDedupeMs)
-      )
-    ) {
-      return;
-    }
-
-    if (!claimSoundEvent(dedupeKey, now)) {
-      return;
-    }
-
-    lastQueuedSoundRef.current = { key: dedupeKey, type, at: now };
-
-    const scheduledStart = Math.max(now, soundBusyUntilRef.current);
     const queueGapMs = 120;
-    soundBusyUntilRef.current = scheduledStart + durationMs + queueGapMs;
 
     const runPlayback = async () => {
       const liveSoundType = resolveSoundType(type);
@@ -912,16 +890,52 @@ export default function Nonstop() {
       }
     };
 
-    const delay = scheduledStart - now;
-    if (delay <= 0) {
-      void runPlayback();
+    const queuePlayback = () => {
+      const queuedAt = Date.now();
+      const sameTypeDedupeMs = Math.max(4000, durationMs + 1500);
+      const lastQueuedSound = lastQueuedSoundRef.current;
+      if (
+        lastQueuedSound &&
+        (
+          (lastQueuedSound.key === dedupeKey && queuedAt - lastQueuedSound.at < 10000) ||
+          (lastQueuedSound.type === type && queuedAt - lastQueuedSound.at < sameTypeDedupeMs)
+        )
+      ) {
+        return;
+      }
+
+      if (!claimSoundEvent(dedupeKey, queuedAt)) {
+        return;
+      }
+
+      lastQueuedSoundRef.current = { key: dedupeKey, type, at: queuedAt };
+
+      const scheduledStart = Math.max(queuedAt, soundBusyUntilRef.current);
+      soundBusyUntilRef.current = scheduledStart + durationMs + queueGapMs;
+      const delay = scheduledStart - queuedAt;
+      if (delay <= 0) {
+        void runPlayback();
+        return;
+      }
+
+      const timeoutId = setTimeout(() => {
+        void runPlayback();
+        soundTimeoutsRef.current = soundTimeoutsRef.current.filter((id) => id !== timeoutId);
+      }, delay);
+      soundTimeoutsRef.current.push(timeoutId);
+    };
+
+    if (!isPresentationMode) {
+      queuePlayback();
       return;
     }
 
+    // The control tab has priority. Presentation only sounds if no control tab claimed it.
+    const fallbackDelayMs = 700;
     const timeoutId = setTimeout(() => {
-      void runPlayback();
+      queuePlayback();
       soundTimeoutsRef.current = soundTimeoutsRef.current.filter((id) => id !== timeoutId);
-    }, delay);
+    }, fallbackDelayMs);
     soundTimeoutsRef.current.push(timeoutId);
   };
 
@@ -971,7 +985,7 @@ export default function Nonstop() {
   };
 
   useEffect(() => {
-    if (!syncedTimer || readOnlyMode || isPresentationMode) return;
+    if (!syncedTimer || readOnlyMode) return;
 
     const nextSnapshot = {
       timerState: syncedTimer.timerState as TimerState,
@@ -1053,13 +1067,12 @@ export default function Nonstop() {
     syncedTimer?.isActive,
     syncedTimer?.round,
     syncedTimer?.phaseEndsAt,
-    isPresentationMode,
     readOnlyMode,
     totalRounds,
   ]);
 
   useEffect(() => {
-    if (!isActive || timeLeft > 0 || readOnlyMode || isPresentationMode) return;
+    if (!isActive || timeLeft > 0 || readOnlyMode) return;
 
     let fallbackSound: TimerSound | null = null;
     if (timerState === "warmup") {
@@ -1083,7 +1096,7 @@ export default function Nonstop() {
     rememberBoundarySound(boundaryId, now);
 
     playSound(fallbackSound, `boundary:${fallbackSound}:${boundaryId}`);
-  }, [isActive, timeLeft, timerState, round, totalRounds, readOnlyMode, isPresentationMode, settings?.restTime]);
+  }, [isActive, timeLeft, timerState, round, totalRounds, readOnlyMode, settings?.restTime]);
 
   useEffect(() => {
     if (readOnlyMode) {

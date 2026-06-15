@@ -1,6 +1,7 @@
 import { pgTable, text, serial, varchar, integer, timestamp, doublePrecision } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { DEFAULT_RANKING_SEASONS_JSON, RANKING_SEASON_ID_MAX, RANKING_SEASON_ID_MIN } from "./ranking-seasons.js";
 
 export const nonstopEvents = pgTable("nonstop_events", {
   id: serial("id").primaryKey(),
@@ -79,6 +80,7 @@ export const settings = pgTable("settings", {
   tieBreaker: text("tie_breaker").notNull().default("direct"), // "direct" or "diff"
   playerProfileOptions: text("player_profile_options").notNull().default("[\"Academia\",\"Fecha jogos\",\"Non Stop\"]"),
   nonstopCategories: text("nonstop_categories").notNull().default("[\"Non Stop\"]"),
+  rankingSeasons: text("ranking_seasons").notNull().default(DEFAULT_RANKING_SEASONS_JSON),
 });
 
 export const rankingEntries = pgTable("ranking_entries", {
@@ -240,7 +242,7 @@ export const rankingImportRowSchema = z.object({
 
 export const rankingImportSchema = z.object({
   batchLabel: z.string().max(120).optional(),
-  seasonYear: z.number().int().min(2000).max(3000).optional(),
+  seasonYear: z.number().int().min(RANKING_SEASON_ID_MIN).max(RANKING_SEASON_ID_MAX).optional(),
   category: z.string().trim().min(1).max(60).optional(),
   rows: z.array(rankingImportRowSchema).min(1),
 });

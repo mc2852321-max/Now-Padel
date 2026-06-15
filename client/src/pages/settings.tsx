@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { parseRankingSeasons, serializeRankingSeasons, type RankingSeasonConfig } from "@shared/ranking-seasons";
 
 type DurationConfig = {
   soundDurationTarget?: string;
@@ -38,6 +39,12 @@ function formatPhoneNumber(value?: string | null) {
     return `+351 ${digits.slice(3, 6)} ${digits.slice(6, 9)} ${digits.slice(9)}`;
   }
   return value;
+}
+
+function formatSeasonDate(value: string) {
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function parseLineListSetting(raw: string | null | undefined, fallback: string[]): string[] {
@@ -701,6 +708,7 @@ export default function Settings() {
       soundDurationSeconds: 5,
       playerProfileOptions: "Academia\nFecha jogos\nNon Stop",
       nonstopCategories: "Non Stop",
+      rankingSeasons: serializeRankingSeasons(undefined),
       startWarmupSound: "beep-low",
       startGameSound: "beep-high",
       endGameSound: "beep-low",
@@ -712,8 +720,13 @@ export default function Settings() {
   useEffect(() => {
     if (settings) {
       const loadedCategories = parseLineListSetting(settings.nonstopCategories, ["Non Stop"]);
+      const loadedSeasons = parseRankingSeasons(settings.rankingSeasons);
       setRankingCategoriesDraft(loadedCategories);
+      setRankingSeasonsDraft(loadedSeasons);
       setNewRankingCategoryName("");
+      setNewRankingSeasonName("");
+      setNewRankingSeasonStart("");
+      setNewRankingSeasonEnd("");
       form.reset({
         clubName: settings.clubName,
         primaryColor: settings.primaryColor,
@@ -731,6 +744,7 @@ export default function Settings() {
         soundDurationSeconds: settings.soundDurationSeconds ?? settings.airHornDuration ?? 5,
         playerProfileOptions: parseLineListSetting(settings.playerProfileOptions, ["Academia", "Fecha jogos", "Non Stop"]).join("\n"),
         nonstopCategories: loadedCategories.join("\n"),
+        rankingSeasons: serializeRankingSeasons(loadedSeasons),
         startWarmupSound: settings.startWarmupSound,
         startGameSound: settings.startGameSound,
         endGameSound: settings.endGameSound,
@@ -744,8 +758,13 @@ export default function Settings() {
   const [confirmDeleteCategoryOpen, setConfirmDeleteCategoryOpen] = useState(false);
   const [categoryPendingDelete, setCategoryPendingDelete] = useState<{ index: number; name: string } | null>(null);
   const [rankingCategoriesDraft, setRankingCategoriesDraft] = useState<string[]>(["Non Stop"]);
+  const [rankingSeasonsDraft, setRankingSeasonsDraft] = useState<RankingSeasonConfig[]>(() => parseRankingSeasons(undefined));
   const [isAddCategoryDialogOpen, setIsAddCategoryDialogOpen] = useState(false);
   const [newRankingCategoryName, setNewRankingCategoryName] = useState("");
+  const [isAddSeasonDialogOpen, setIsAddSeasonDialogOpen] = useState(false);
+  const [newRankingSeasonName, setNewRankingSeasonName] = useState("");
+  const [newRankingSeasonStart, setNewRankingSeasonStart] = useState("");
+  const [newRankingSeasonEnd, setNewRankingSeasonEnd] = useState("");
 
   const sanitizeRankingCategoryName = (value: string) => value.trim().replace(/\s+/g, " ");
 
@@ -796,12 +815,80 @@ export default function Settings() {
     setConfirmDeleteCategoryOpen(false);
   };
 
+  const getNextRankingSeasonId = (startsAt: string) => {
+    const year = Number(startsAt.slice(0, 4)) || new Date().getFullYear();
+    const used = new Set(rankingSeasonsDraft.map((season) => season.id));
+    let index = rankingSeasonsDraft.filter((season) => String(season.id).startsWith(String(year))).length + 1;
+    let candidate = year * 100 + index;
+    while (used.has(candidate)) {
+      index += 1;
+      candidate = year * 100 + index;
+    }
+    return candidate;
+  };
+
+  const addRankingSeason = () => {
+    const cleanName = newRankingSeasonName.trim().replace(/\s+/g, " ");
+    if (!cleanName || !newRankingSeasonStart || !newRankingSeasonEnd) {
+      toast({
+        title: "Dados em falta",
+        description: "Indica o nome, início e fim da temporada.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (newRankingSeasonStart > newRankingSeasonEnd) {
+      toast({
+        title: "Datas inválidas",
+        description: "A data de início tem de ser anterior à data de fim.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const alreadyExists = rankingSeasonsDraft.some(
+      (season) => season.name.toLocaleLowerCase("pt-PT") === cleanName.toLocaleLowerCase("pt-PT"),
+    );
+    if (alreadyExists) {
+      toast({
+        title: "Temporada duplicada",
+        description: "Já existe uma temporada com esse nome.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setRankingSeasonsDraft((current) =>
+      [
+        ...current,
+        {
+          id: getNextRankingSeasonId(newRankingSeasonStart),
+          name: cleanName,
+          startsAt: newRankingSeasonStart,
+          endsAt: newRankingSeasonEnd,
+        },
+      ].sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.id - b.id),
+    );
+    setNewRankingSeasonName("");
+    setNewRankingSeasonStart("");
+    setNewRankingSeasonEnd("");
+    setIsAddSeasonDialogOpen(false);
+  };
+
+  const removeRankingSeasonAt = (index: number) => {
+    setRankingSeasonsDraft((current) => {
+      if (current.length <= 1) return current;
+      const next = current.filter((_, itemIndex) => itemIndex !== index);
+      return next.length > 0 ? next : current;
+    });
+  };
+
   const mutation = useMutation({
     mutationFn: async (data: any) => {
       const res = await apiRequest("POST", "/api/settings", {
         ...data,
         playerProfileOptions: encodeLineListSetting(data.playerProfileOptions, ["Academia", "Fecha jogos", "Non Stop"]),
         nonstopCategories: encodeLineListSetting(data.nonstopCategories, ["Non Stop"]),
+        rankingSeasons: serializeRankingSeasons(data.rankingSeasons),
         whatsappNotifications: data.whatsappNotifications ? 1 : 0,
         emailNotifications: data.emailNotifications ? 1 : 0,
         publicRegistration: data.publicRegistration ? 1 : 0
@@ -839,6 +926,7 @@ export default function Settings() {
     const payload = {
       ...data,
       nonstopCategories: nextCategories.join("\n"),
+      rankingSeasons: serializeRankingSeasons(rankingSeasonsDraft),
     };
     mutation.mutate(payload);
   };
@@ -1201,9 +1289,114 @@ export default function Settings() {
 
               <Card>
                 <CardHeader>
+                  <CardTitle>Temporadas do Ranking</CardTitle>
+                  <CardDescription>
+                    Define os períodos onde os rankings acumulam pontos. Os trimestres de 2026 já ficam criados.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="space-y-2">
+                    {rankingSeasonsDraft.map((season, index) => (
+                      <div key={`ranking-season-row-${season.id}`} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-slate-900">{season.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatSeasonDate(season.startsAt)} - {formatSeasonDate(season.endsAt)}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={() => removeRankingSeasonAt(index)}
+                          disabled={rankingSeasonsDraft.length <= 1}
+                          title={rankingSeasonsDraft.length <= 1
+                            ? "Tem de existir pelo menos uma temporada."
+                            : "Remover temporada"}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  <Dialog
+                    open={isAddSeasonDialogOpen}
+                    onOpenChange={(open) => {
+                      setIsAddSeasonDialogOpen(open);
+                      if (!open) {
+                        setNewRankingSeasonName("");
+                        setNewRankingSeasonStart("");
+                        setNewRankingSeasonEnd("");
+                      }
+                    }}
+                  >
+                    <DialogTrigger asChild>
+                      <Button type="button" variant="secondary" className="w-full gap-2 sm:w-auto">
+                        <Plus className="h-4 w-4" />
+                        Adicionar temporada
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Nova temporada</DialogTitle>
+                        <DialogDescription>
+                          Cria um período para acumular pontos, por exemplo 1.º Trimestre 2027.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="new-ranking-season-name">Nome da temporada</Label>
+                          <Input
+                            id="new-ranking-season-name"
+                            value={newRankingSeasonName}
+                            onChange={(event) => setNewRankingSeasonName(event.target.value)}
+                            placeholder="Ex: 1.º Trimestre 2027"
+                            autoFocus
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label htmlFor="new-ranking-season-start">Início</Label>
+                            <Input
+                              id="new-ranking-season-start"
+                              type="date"
+                              value={newRankingSeasonStart}
+                              onChange={(event) => setNewRankingSeasonStart(event.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="new-ranking-season-end">Fim</Label>
+                            <Input
+                              id="new-ranking-season-end"
+                              type="date"
+                              value={newRankingSeasonEnd}
+                              onChange={(event) => setNewRankingSeasonEnd(event.target.value)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button type="button" variant="secondary" onClick={() => setIsAddSeasonDialogOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button type="button" onClick={addRankingSeason}>
+                          OK
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                  <FormDescription>
+                    Ao finalizar um Non Stop, os pontos entram automaticamente na temporada correspondente à data do evento.
+                  </FormDescription>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
                   <CardTitle>Categorias do Ranking</CardTitle>
                   <CardDescription>
-                    Escolhe as categorias disponiveis no Non Stop e no filtro do ranking.
+                    Escolhe os rankings/categorias disponíveis dentro de cada temporada e no Non Stop.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">

@@ -25,6 +25,14 @@ import type {
   RankingLeaderboardRow,
   RankingSeasonHistoryRow,
 } from "./storage.js";
+import {
+  buildRankingSeasonOptions,
+  getRankingSeasonForDate,
+  normalizeRankingSeasonId,
+  parseRankingSeasons,
+  serializeRankingSeasons,
+  type RankingSeasonOption,
+} from "../shared/ranking-seasons.js";
 
 const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
 const RANKING_ALL_CATEGORIES_TOKEN = "__all__";
@@ -141,6 +149,7 @@ export class LocalStorage implements IStorage {
     tieBreaker: "direct",
     playerProfileOptions: "[\"Academia\",\"Fecha jogos\",\"Non Stop\"]",
     nonstopCategories: "[\"Non Stop\"]",
+    rankingSeasons: serializeRankingSeasons(undefined),
   };
 
   constructor() {
@@ -161,9 +170,9 @@ export class LocalStorage implements IStorage {
     return cleaned.length <= 60 ? cleaned : cleaned.slice(0, 60).trim() || fallback;
   }
 
-  private parseNonstopCategories(): string[] {
+  private parseNonstopCategoriesFrom(raw: unknown): string[] {
     try {
-      const parsed = JSON.parse(this.settings.nonstopCategories);
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
       if (Array.isArray(parsed)) {
         const categories = parsed
           .map((value) => this.normalizeNonstopCategory(value, ""))
@@ -174,6 +183,33 @@ export class LocalStorage implements IStorage {
       // keep local mode forgiving when settings are edited by hand
     }
     return [DEFAULT_NONSTOP_CATEGORY];
+  }
+
+  private parseNonstopCategories(): string[] {
+    return this.parseNonstopCategoriesFrom(this.settings.nonstopCategories);
+  }
+
+  private parseRankingSeasons() {
+    return parseRankingSeasons(this.settings.rankingSeasons);
+  }
+
+  private getLisbonDateKey(dateLike: Date | string | null | undefined): string {
+    const value = dateLike ? new Date(dateLike) : new Date();
+    const safeDate = Number.isNaN(value.getTime()) ? new Date() : value;
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Lisbon",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(safeDate);
+  }
+
+  private getRankingSeasonIdForDate(dateLike: Date | string | null | undefined): number {
+    return getRankingSeasonForDate(
+      this.settings.rankingSeasons,
+      this.getLisbonDateKey(dateLike),
+      getLisbonYear(dateLike),
+    ).id;
   }
 
   private categoryKey(category: string): string {
@@ -411,7 +447,7 @@ export class LocalStorage implements IStorage {
     const eventResults = this.results.filter((result) => result.eventId === completedEventId);
     this.awardRankingForCurrentEvent(
       completedEventId,
-      getLisbonYear(this.event.startedAt ?? this.event.createdAt),
+      this.getRankingSeasonIdForDate(this.event.startedAt ?? this.event.createdAt),
       category,
       eventTeams,
       eventResults,
@@ -534,7 +570,16 @@ export class LocalStorage implements IStorage {
   }
 
   async updateSettings(update: Partial<InsertSettings>): Promise<Settings> {
-    this.settings = { ...this.settings, ...update };
+    this.settings = {
+      ...this.settings,
+      ...update,
+      nonstopCategories: update.nonstopCategories !== undefined
+        ? JSON.stringify(this.parseNonstopCategoriesFrom(update.nonstopCategories))
+        : this.settings.nonstopCategories,
+      rankingSeasons: update.rankingSeasons !== undefined
+        ? serializeRankingSeasons(update.rankingSeasons)
+        : this.settings.rankingSeasons,
+    };
     return this.settings;
   }
 
@@ -570,7 +615,7 @@ export class LocalStorage implements IStorage {
   }
 
   async getRankingLeaderboard(seasonYear?: number, category?: string): Promise<RankingLeaderboardRow[]> {
-    const targetSeason = Number.isInteger(seasonYear) ? seasonYear! : getLisbonYear();
+    const targetSeason = normalizeRankingSeasonId(seasonYear) ?? await this.getCurrentRankingSeasonId();
     const includeAllCategories = typeof category === "string" && category.trim().toLowerCase() === RANKING_ALL_CATEGORIES_TOKEN;
     const categories = await this.getRankingCategories();
     const requestedCategory = this.normalizeNonstopCategory(category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
@@ -617,7 +662,7 @@ export class LocalStorage implements IStorage {
   }
 
   async getRankingEntries(playerId?: number, seasonYear?: number, category?: string): Promise<RankingEntry[]> {
-    const targetSeason = Number.isInteger(seasonYear) ? seasonYear! : getLisbonYear();
+    const targetSeason = normalizeRankingSeasonId(seasonYear) ?? await this.getCurrentRankingSeasonId();
     const includeAllCategories = typeof category === "string" && category.trim().toLowerCase() === RANKING_ALL_CATEGORIES_TOKEN;
     const categories = await this.getRankingCategories();
     const requestedCategory = this.normalizeNonstopCategory(category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
@@ -633,11 +678,26 @@ export class LocalStorage implements IStorage {
   }
 
   async getRankingSeasons(): Promise<number[]> {
-    const seasons = new Set<number>([getLisbonYear()]);
+    const seasons = new Set<number>([
+      await this.getCurrentRankingSeasonId(),
+      ...this.parseRankingSeasons().map((season) => season.id),
+    ]);
     for (const entry of this.rankingEntries) {
-      seasons.add(entry.seasonYear);
+      const normalizedId = normalizeRankingSeasonId(entry.seasonYear);
+      if (normalizedId) seasons.add(normalizedId);
     }
     return Array.from(seasons).sort((a, b) => b - a);
+  }
+
+  async getRankingSeasonOptions(): Promise<RankingSeasonOption[]> {
+    const discovered = this.rankingEntries
+      .map((entry) => normalizeRankingSeasonId(entry.seasonYear))
+      .filter((id): id is number => Boolean(id));
+    return buildRankingSeasonOptions(this.parseRankingSeasons(), discovered);
+  }
+
+  async getCurrentRankingSeasonId(dateLike?: Date | string | null): Promise<number> {
+    return this.getRankingSeasonIdForDate(dateLike ?? new Date());
   }
 
   async getRankingCategories(): Promise<string[]> {
@@ -653,10 +713,14 @@ export class LocalStorage implements IStorage {
   }
 
   async getRankingHistory(opts?: { category?: string; limitSeasons?: number }): Promise<RankingSeasonHistoryRow[]> {
-    const seasons = await this.getRankingSeasons();
     const limitSeasons = Number.isFinite(opts?.limitSeasons)
       ? Math.min(5, Math.max(1, Math.trunc(Number(opts?.limitSeasons))))
       : 2;
+    const today = this.getLisbonDateKey(new Date());
+    const seasons = (await this.getRankingSeasonOptions())
+      .filter((season) => season.startsAt <= today || !season.configured)
+      .slice(0, limitSeasons)
+      .map((season) => season.id);
 
     const includeAllCategories = typeof opts?.category === "string" && opts.category.trim().toLowerCase() === RANKING_ALL_CATEGORIES_TOKEN;
     const categories = await this.getRankingCategories();
@@ -668,7 +732,7 @@ export class LocalStorage implements IStorage {
         : (categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
 
     const history: RankingSeasonHistoryRow[] = [];
-    for (const season of seasons.slice(0, limitSeasons)) {
+    for (const season of seasons) {
       const leaderboard = await this.getRankingLeaderboard(season, targetCategory);
       const rowsWithPoints = leaderboard.filter((row) =>
         row.totalPoints !== 0 ||
@@ -708,7 +772,7 @@ export class LocalStorage implements IStorage {
       .filter((row) => row.points !== 0);
     if (cleanRows.length === 0) return 0;
 
-    const seasonYear = Number.isInteger(opts?.seasonYear) ? opts!.seasonYear! : getLisbonYear();
+    const seasonYear = normalizeRankingSeasonId(opts?.seasonYear) ?? await this.getCurrentRankingSeasonId();
     const categories = await this.getRankingCategories();
     const requestedCategory = this.normalizeNonstopCategory(opts?.category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
     const category = categories.includes(requestedCategory)

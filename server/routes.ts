@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { createLisbonDateTime, getLisbonDateInput, getLisbonTimeInput, resolveNonstopStandingsPoints, storage } from "./storage.js";
 import { api } from "../shared/routes.js";
 import { insertTeamSchema, insertNonstopResultSchema, createAuthorizedUserRequestSchema, loginSchema, changePasswordSchema, rankingImportSchema } from "../shared/schema.js";
+import { DEFAULT_RANKING_SEASONS_JSON, normalizeRankingSeasonId } from "../shared/ranking-seasons.js";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
@@ -82,9 +83,7 @@ function parseEventId(value: unknown): number | undefined {
 
 function parseSeasonYear(value: unknown): number | undefined {
   if (value === undefined || value === null || value === "") return undefined;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 2000 || parsed > 3000) return undefined;
-  return parsed;
+  return normalizeRankingSeasonId(value) ?? undefined;
 }
 
 function parseRankingScope(value: unknown): "category" | "all" {
@@ -873,12 +872,13 @@ export async function registerRoutes(
       const pageSize = Number.isFinite(parsedPageSize)
         ? Math.min(100, Math.max(10, Math.trunc(parsedPageSize)))
         : 25;
-      const [availableSeasons, availableCategories] = await Promise.all([
+      const [availableSeasons, seasonOptions, availableCategories, currentSeason] = await Promise.all([
         storage.getRankingSeasons(),
+        storage.getRankingSeasonOptions(),
         storage.getRankingCategories(),
+        storage.getCurrentRankingSeasonId(),
       ]);
-      const currentSeason = getLisbonYear();
-      const season = requestedSeason ?? availableSeasons[0] ?? currentSeason;
+      const season = requestedSeason ?? currentSeason ?? availableSeasons[0] ?? getLisbonYear();
       const category = shouldIncludeAllCategories
         ? RANKING_GENERAL_LABEL
         : (
@@ -906,6 +906,7 @@ export async function registerRoutes(
         category,
         scope: shouldIncludeAllCategories ? "all" : "category",
         availableSeasons,
+        seasonOptions,
         availableCategories,
         page: currentPage,
         pageSize,
@@ -993,9 +994,10 @@ export async function registerRoutes(
       const limitSeasons = Number.isFinite(parsedLimit)
         ? Math.min(5, Math.max(1, Math.trunc(parsedLimit)))
         : 2;
-      const [availableCategories, availableSeasons] = await Promise.all([
+      const [availableCategories, availableSeasons, seasonOptions] = await Promise.all([
         storage.getRankingCategories(),
         storage.getRankingSeasons(),
+        storage.getRankingSeasonOptions(),
       ]);
       const category = shouldIncludeAllCategories
         ? RANKING_GENERAL_LABEL
@@ -1015,6 +1017,7 @@ export async function registerRoutes(
         limitSeasons,
         availableCategories,
         availableSeasons,
+        seasonOptions,
         items,
       });
     } catch (err) {
@@ -1525,7 +1528,8 @@ export async function registerRoutes(
         sound_duration_seconds INTEGER NOT NULL DEFAULT 5,
         tie_breaker TEXT NOT NULL DEFAULT 'direct',
         player_profile_options TEXT NOT NULL DEFAULT '["Academia","Fecha jogos","Non Stop"]',
-        nonstop_categories TEXT NOT NULL DEFAULT '["Non Stop"]'
+        nonstop_categories TEXT NOT NULL DEFAULT '["Non Stop"]',
+        ranking_seasons TEXT NOT NULL DEFAULT '${sql.raw(DEFAULT_RANKING_SEASONS_JSON.replace(/'/g, "''"))}'
       )
     `);
 
@@ -1592,6 +1596,13 @@ export async function registerRoutes(
       UPDATE ranking_entries
       SET category = 'Non Stop'
       WHERE category IS NULL OR BTRIM(category) = ''
+    `);
+
+    await db.execute(sql`
+      UPDATE ranking_entries
+      SET season_year = 202603
+      WHERE season_year = 2026
+        AND LOWER(category) LIKE '%nownights%'
     `);
 
     await db.execute(sql`
@@ -2006,6 +2017,11 @@ export async function registerRoutes(
     await db.execute(sql`
       ALTER TABLE settings
       ADD COLUMN IF NOT EXISTS nonstop_categories TEXT NOT NULL DEFAULT '["Non Stop"]'
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE settings
+      ADD COLUMN IF NOT EXISTS ranking_seasons TEXT NOT NULL DEFAULT '${sql.raw(DEFAULT_RANKING_SEASONS_JSON.replace(/'/g, "''"))}'
     `);
 
     await db.execute(sql`

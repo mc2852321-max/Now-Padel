@@ -24,6 +24,14 @@ import {
   type AuthorizedUser,
   type InsertAuthorizedUser,
 } from "../shared/schema.js";
+import {
+  buildRankingSeasonOptions,
+  getRankingSeasonForDate,
+  normalizeRankingSeasonId,
+  parseRankingSeasons,
+  serializeRankingSeasons,
+  type RankingSeasonOption,
+} from "../shared/ranking-seasons.js";
 import { db, hasDatabase } from "./db.js";
 import { eq, and, or, ilike, desc, count, sql, inArray } from "drizzle-orm";
 import { LocalStorage } from "./local-storage.js";
@@ -173,6 +181,8 @@ export interface IStorage {
   getRankingLeaderboard(seasonYear?: number, category?: string): Promise<RankingLeaderboardRow[]>;
   getRankingEntries(playerId?: number, seasonYear?: number, category?: string): Promise<RankingEntry[]>;
   getRankingSeasons(): Promise<number[]>;
+  getRankingSeasonOptions(): Promise<RankingSeasonOption[]>;
+  getCurrentRankingSeasonId(dateLike?: Date | string | null): Promise<number>;
   getRankingCategories(): Promise<string[]>;
   getRankingHistory(opts?: { category?: string; limitSeasons?: number }): Promise<RankingSeasonHistoryRow[]>;
   importRankingBasePoints(rows: RankingImportRow[], opts?: { batchLabel?: string; seasonYear?: number; category?: string; userEmail?: string | null }): Promise<number>;
@@ -330,6 +340,17 @@ export class DatabaseStorage implements IStorage {
     return this.getLisbonYear(new Date());
   }
 
+  private getLisbonDateKey(dateLike: Date | string | null | undefined): string {
+    const value = dateLike ? new Date(dateLike) : new Date();
+    const safeDate = Number.isNaN(value.getTime()) ? new Date() : value;
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: LISBON_TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(safeDate);
+  }
+
   private async pruneOldRankingSeasons(
     seasonsToKeep = RANKING_HISTORY_SEASONS_TO_KEEP,
     executor: DbExecutor = db,
@@ -346,10 +367,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   private resolveSeasonYearInput(seasonYear?: number): number {
-    if (typeof seasonYear === "number" && Number.isInteger(seasonYear) && seasonYear >= 2000 && seasonYear <= 3000) {
-      return seasonYear;
-    }
+    const normalized = normalizeRankingSeasonId(seasonYear);
+    if (normalized) return normalized;
     return this.getCurrentSeasonYear();
+  }
+
+  private resolveRankingSeasonIdFromSettings(appSettings: Settings, dateLike?: Date | string | null): number {
+    const season = getRankingSeasonForDate(
+      appSettings.rankingSeasons,
+      this.getLisbonDateKey(dateLike),
+      this.getLisbonYear(dateLike),
+    );
+    return season.id;
   }
 
   private isAllCategoriesSelection(value: unknown): boolean {
@@ -401,8 +430,9 @@ export class DatabaseStorage implements IStorage {
     return encodeURIComponent(this.normalizeNonstopCategory(category));
   }
 
-  private getSeasonYearFromEvent(event: Pick<NonstopEvent, "startedAt" | "createdAt">): number {
-    return this.getLisbonYear(event.startedAt ?? event.createdAt);
+  private async getSeasonYearFromEvent(event: Pick<NonstopEvent, "startedAt" | "createdAt">): Promise<number> {
+    const appSettings = await this.getSettings();
+    return this.resolveRankingSeasonIdFromSettings(appSettings, event.startedAt ?? event.createdAt);
   }
 
   private getTeamPlayerIds(team: Team): number[] {
@@ -850,7 +880,10 @@ export class DatabaseStorage implements IStorage {
         },
         standings,
       });
-      const seasonYear = this.getSeasonYearFromEvent(activeEvent);
+      const seasonYear = this.resolveRankingSeasonIdFromSettings(
+        appSettings,
+        activeEvent.startedAt ?? activeEvent.createdAt,
+      );
 
       await this.awardRankingForCompletedEvent(
         activeEvent.id,
@@ -1029,19 +1062,21 @@ export class DatabaseStorage implements IStorage {
     if (!existing) {
       const [created] = await db.insert(settings).values({
         nonstopCategories: JSON.stringify([DEFAULT_NONSTOP_CATEGORY]),
+        rankingSeasons: serializeRankingSeasons(undefined),
       }).returning();
       return created;
     }
     const normalizedCategories = this.serializeNonstopCategories((existing as any).nonstopCategories);
-    if (existing.nonstopCategories === normalizedCategories) {
+    const normalizedSeasons = serializeRankingSeasons((existing as any).rankingSeasons);
+    if (existing.nonstopCategories === normalizedCategories && existing.rankingSeasons === normalizedSeasons) {
       return existing;
     }
     const [updated] = await db
       .update(settings)
-      .set({ nonstopCategories: normalizedCategories })
+      .set({ nonstopCategories: normalizedCategories, rankingSeasons: normalizedSeasons })
       .where(eq(settings.id, existing.id))
       .returning();
-    return updated ?? { ...existing, nonstopCategories: normalizedCategories };
+    return updated ?? { ...existing, nonstopCategories: normalizedCategories, rankingSeasons: normalizedSeasons };
   }
 
   async updateSettings(update: Partial<InsertSettings>): Promise<Settings> {
@@ -1052,6 +1087,9 @@ export class DatabaseStorage implements IStorage {
     if ("nonstopCategories" in normalizedUpdate) {
       nextCategories = this.parseNonstopCategories(normalizedUpdate.nonstopCategories);
       normalizedUpdate.nonstopCategories = JSON.stringify(nextCategories);
+    }
+    if ("rankingSeasons" in normalizedUpdate) {
+      normalizedUpdate.rankingSeasons = serializeRankingSeasons(normalizedUpdate.rankingSeasons);
     }
     const removedCategories = currentCategories.filter((category) => !nextCategories.includes(category));
     const fallbackCategory = nextCategories[0] ?? DEFAULT_NONSTOP_CATEGORY;
@@ -1116,7 +1154,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRankingEntries(playerId?: number, seasonYear?: number, category?: string): Promise<RankingEntry[]> {
-    const targetSeason = this.resolveSeasonYearInput(seasonYear);
+    const targetSeason = normalizeRankingSeasonId(seasonYear) ?? await this.getCurrentRankingSeasonId();
     const shouldIncludeAllCategories = this.isAllCategoriesSelection(category);
     let targetCategory = DEFAULT_NONSTOP_CATEGORY;
     const conditions: any[] = [eq(rankingEntries.seasonYear, targetSeason)];
@@ -1143,7 +1181,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRankingLeaderboard(seasonYear?: number, category?: string): Promise<RankingLeaderboardRow[]> {
-    const targetSeason = this.resolveSeasonYearInput(seasonYear);
+    const targetSeason = normalizeRankingSeasonId(seasonYear) ?? await this.getCurrentRankingSeasonId();
     const shouldIncludeAllCategories = this.isAllCategoriesSelection(category);
     let targetCategory = DEFAULT_NONSTOP_CATEGORY;
     let rankingFilter = eq(rankingEntries.seasonYear, targetSeason);
@@ -1200,22 +1238,42 @@ export class DatabaseStorage implements IStorage {
 
   async getRankingSeasons(): Promise<number[]> {
     await this.pruneOldRankingSeasons();
-    const currentSeason = this.getCurrentSeasonYear();
+    const appSettings = await this.getSettings();
+    const configuredSeasons = parseRankingSeasons(appSettings.rankingSeasons);
+    const currentSeason = this.resolveRankingSeasonIdFromSettings(appSettings, new Date());
     const rows = await db
       .selectDistinct({ seasonYear: rankingEntries.seasonYear })
       .from(rankingEntries)
       .where(sql`${rankingEntries.seasonYear} IS NOT NULL`)
       .orderBy(desc(rankingEntries.seasonYear));
 
-    const seasons = new Set<number>([currentSeason]);
+    const seasons = new Set<number>([currentSeason, ...configuredSeasons.map((season) => season.id)]);
 
     for (const row of rows) {
-      if (typeof row.seasonYear === "number") {
-        seasons.add(row.seasonYear);
-      }
+      const normalizedId = normalizeRankingSeasonId(row.seasonYear);
+      if (normalizedId) seasons.add(normalizedId);
     }
 
     return Array.from(seasons).sort((a, b) => b - a);
+  }
+
+  async getRankingSeasonOptions(): Promise<RankingSeasonOption[]> {
+    const appSettings = await this.getSettings();
+    const configuredSeasons = parseRankingSeasons(appSettings.rankingSeasons);
+    const rows = await db
+      .selectDistinct({ seasonYear: rankingEntries.seasonYear })
+      .from(rankingEntries)
+      .where(sql`${rankingEntries.seasonYear} IS NOT NULL`);
+    const discovered = rows
+      .map((row) => normalizeRankingSeasonId(row.seasonYear))
+      .filter((id): id is number => Boolean(id));
+
+    return buildRankingSeasonOptions(configuredSeasons, discovered);
+  }
+
+  async getCurrentRankingSeasonId(dateLike?: Date | string | null): Promise<number> {
+    const appSettings = await this.getSettings();
+    return this.resolveRankingSeasonIdFromSettings(appSettings, dateLike ?? new Date());
   }
 
   async getRankingCategories(): Promise<string[]> {
@@ -1263,7 +1321,12 @@ export class DatabaseStorage implements IStorage {
     const limitSeasons = Number.isFinite(opts?.limitSeasons)
       ? Math.min(5, Math.max(1, Math.trunc(Number(opts?.limitSeasons))))
       : 2;
-    const seasons = (await this.getRankingSeasons()).slice(0, limitSeasons);
+    const today = this.getLisbonDateKey(new Date());
+    const seasonOptions = await this.getRankingSeasonOptions();
+    const seasons = seasonOptions
+      .filter((season) => season.startsAt <= today || !season.configured)
+      .slice(0, limitSeasons)
+      .map((season) => season.id);
     const history: RankingSeasonHistoryRow[] = [];
 
     for (const season of seasons) {
@@ -1318,7 +1381,7 @@ export class DatabaseStorage implements IStorage {
     if (cleanRows.length === 0) return 0;
 
     const batchLabel = (opts?.batchLabel ?? "").trim() || new Date().toISOString();
-    const seasonYear = this.resolveSeasonYearInput(opts?.seasonYear);
+    const seasonYear = normalizeRankingSeasonId(opts?.seasonYear) ?? await this.getCurrentRankingSeasonId();
     const categories = await this.getRankingCategories();
     const requestedCategory = this.normalizeNonstopCategory(opts?.category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
     const category = categories.includes(requestedCategory)

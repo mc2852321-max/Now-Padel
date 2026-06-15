@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { fetchAllPlayers, type PlayersPageResponse } from "@/lib/players";
+import { getRankingSeasonLabel, type RankingSeasonOption } from "@shared/ranking-seasons";
 
 const RANKING_POLL_MS = 60_000;
 
@@ -43,6 +44,7 @@ type RankingResponse = {
   category: string;
   scope?: "category" | "all";
   availableSeasons: number[];
+  seasonOptions?: RankingSeasonOption[];
   availableCategories: string[];
   page: number;
   pageSize: number;
@@ -81,6 +83,7 @@ type RankingHistoryResponse = {
   limitSeasons: number;
   availableCategories: string[];
   availableSeasons: number[];
+  seasonOptions?: RankingSeasonOption[];
   items: RankingHistoryItem[];
 };
 
@@ -264,11 +267,6 @@ export default function Ranking() {
     return players.filter((player) => player.name.toLowerCase().includes(search));
   }, [playerSearch, players]);
 
-  const totalImportedPoints = useMemo(
-    () => ranking?.summary.importedPoints ?? 0,
-    [ranking?.summary.importedPoints],
-  );
-
   const importMutation = useMutation({
     mutationFn: async (payload: { batchLabel?: string; seasonYear?: number; category?: string; rows: Array<{ playerId: number; points: number }> }) => {
       const res = await apiRequest("POST", "/api/ranking/import", payload);
@@ -388,9 +386,9 @@ export default function Ranking() {
     setIsExportingRanking(true);
     try {
       const exportItems = await fetchRankingExportItems(season, exportCategory, includeAllCategories);
+      const exportSeasonLabel = getRankingSeasonLabel(season, ranking.seasonOptions ?? []);
       const totalPlayers = exportItems.length;
       const totalPoints = exportItems.reduce((sum, row) => sum + row.totalPoints, 0);
-      const importedPoints = exportItems.reduce((sum, row) => sum + row.importedPoints, 0);
 
       const wb = XLSX.utils.book_new();
       const ws: any = XLSX.utils.aoa_to_sheet([]);
@@ -482,11 +480,11 @@ export default function Ranking() {
       };
 
       XLSX.utils.sheet_add_aoa(ws, [[title]], { origin: "A1" });
-      XLSX.utils.sheet_add_aoa(ws, [[`${clubName} · Temporada ${season} · Exportado em ${exportDateTime}`]], { origin: "A2" });
+      XLSX.utils.sheet_add_aoa(ws, [[`${clubName} · ${exportSeasonLabel} · Exportado em ${exportDateTime}`]], { origin: "A2" });
       XLSX.utils.sheet_add_aoa(ws, [
-        ["Ranking", exportCategory, "", "Temporada", season],
+        ["Ranking", exportCategory, "", "Temporada", exportSeasonLabel],
         ["Atualizado em", exportDateTime, "", "Jogadores", totalPlayers],
-        ["Pontos totais", totalPoints, "", "Base importada", importedPoints],
+        ["Pontos totais", totalPoints, "", "", ""],
       ], { origin: "A4" });
       XLSX.utils.sheet_add_aoa(ws, [tableHeaders], { origin: "A8" });
 
@@ -574,14 +572,14 @@ export default function Ranking() {
       ws["!autofilter"] = { ref: `A8:E${lastTableRow}` };
       wb.Props = {
         Title: title,
-        Subject: `Ranking ${season}`,
+        Subject: `Ranking ${exportSeasonLabel}`,
         Author: clubName,
         CreatedDate: exportedAt,
       };
 
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
       const fileDate = exportedAt.toISOString().slice(0, 10);
-      const filename = `now-padel-ranking-${slugifyFilePart(exportCategory)}-temporada-${season}-${fileDate}.xlsx`;
+      const filename = `now-padel-ranking-${slugifyFilePart(exportCategory)}-${slugifyFilePart(exportSeasonLabel)}-${fileDate}.xlsx`;
       XLSX.writeFile(wb, filename);
 
       toast({
@@ -610,6 +608,11 @@ export default function Ranking() {
   const categoryLabel = isGeneralCategorySelected
     ? "Geral (todas as categorias)"
     : (ranking?.category ?? "-");
+  const seasonOptions = ranking?.seasonOptions ?? rankingHistory?.seasonOptions ?? [];
+  const seasonLabel = ranking
+    ? getRankingSeasonLabel(ranking.season, seasonOptions)
+    : "-";
+  const getSeasonLabel = (seasonId: number) => getRankingSeasonLabel(seasonId, seasonOptions);
 
   return (
     <div className="space-y-6">
@@ -631,7 +634,7 @@ export default function Ranking() {
               </TooltipTrigger>
               <TooltipContent side="bottom" align="start" className="max-w-[380px] space-y-2 whitespace-normal leading-relaxed">
                 <p className="font-medium">
-                  Regras da temporada {ranking?.season ?? "-"}
+                  Regras da {seasonLabel}
                 </p>
                 <ul className="list-disc space-y-1 pl-4">
                   <li>Participação: +{formatPoints(ranking?.rules.participation ?? 2)} pontos.</li>
@@ -651,7 +654,7 @@ export default function Ranking() {
             </Tooltip>
           </div>
           <p className="text-sm text-muted-foreground">
-            Temporada {ranking?.season ?? "-"} · Categoria {categoryLabel}: consulte as regras no ícone de informação.
+            {seasonLabel} · Categoria {categoryLabel}: consulte as regras no ícone de informação.
           </p>
           {playersErrorMessage && (
             <p className="text-sm text-red-600">
@@ -670,9 +673,9 @@ export default function Ranking() {
               <SelectValue placeholder="Temporada" />
             </SelectTrigger>
             <SelectContent>
-              {(ranking?.availableSeasons ?? []).map((season) => (
+              {(ranking?.seasonOptions?.length ? ranking.seasonOptions.map((season) => season.id) : ranking?.availableSeasons ?? []).map((season) => (
                 <SelectItem key={`season-option-${season}`} value={String(season)}>
-                  Temporada {season}
+                  {getSeasonLabel(season)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -807,7 +810,7 @@ export default function Ranking() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Jogadores no ranking</CardTitle>
@@ -822,14 +825,6 @@ export default function Ranking() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold">{formatPoints(ranking?.summary.totalPoints ?? 0)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Base importada</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{formatPoints(totalImportedPoints)}</p>
           </CardContent>
         </Card>
       </div>
@@ -855,7 +850,7 @@ export default function Ranking() {
                 <div key={`history-season-${seasonRow.season}`} className="space-y-3 rounded-md border p-4">
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-semibold">Temporada {seasonRow.season}</p>
+                      <p className="text-sm font-semibold">{getSeasonLabel(seasonRow.season)}</p>
                       <p className="text-xs text-muted-foreground">
                         Atualizado: {formatDateTime(seasonRow.lastEntryAt)}
                       </p>
@@ -869,7 +864,7 @@ export default function Ranking() {
                       Ver temporada
                     </Button>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-sm">
+                  <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
                       <p className="text-xs text-muted-foreground">Jogadores</p>
                       <p className="font-semibold">{seasonRow.totalPlayers}</p>
@@ -877,10 +872,6 @@ export default function Ranking() {
                     <div>
                       <p className="text-xs text-muted-foreground">Pontos</p>
                       <p className="font-semibold">{formatPoints(seasonRow.totalPoints)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Base</p>
-                      <p className="font-semibold">{formatPoints(seasonRow.importedPoints)}</p>
                     </div>
                   </div>
                   <div className="space-y-1">

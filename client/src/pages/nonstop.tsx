@@ -10,14 +10,15 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { AUTH_RESTORED_EVENT, apiRequest, isUnauthorizedError, queryClient } from "@/lib/queryClient";
 import { fetchAllPlayers, type PlayersPageResponse } from "@/lib/players";
+import { PlayerForm } from "@/components/player-form";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, History, Save } from "lucide-react";
+import { ListOrdered, Medal, Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, History, Save, Trophy } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -25,6 +26,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { format } from "date-fns";
+import { AnimatePresence, motion } from "framer-motion";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 type TimerSound = 'start-warmup' | 'start-game' | 'end-game' | 'final';
@@ -49,6 +51,26 @@ type NonstopEventDetails = {
   timer: SyncedTimer;
   snapshot: any | null;
 };
+type RankingPreviewItem = {
+  position: number;
+  playerId: number;
+  name: string;
+  level: string;
+  totalPoints: number;
+  importedPoints: number;
+  participationCount: number;
+  roundWins: number;
+  lastEntryAt: string | null;
+};
+type RankingPreviewResponse = {
+  season: number;
+  category: string;
+  items: RankingPreviewItem[];
+};
+type NonstopFinalizeResponse = {
+  completedEventId: number;
+  newEvent: NonstopEventSummary;
+};
 type WakeLockSentinelLike = EventTarget & {
   released?: boolean;
   release: () => Promise<void>;
@@ -68,6 +90,10 @@ const NONSTOP_SLOW_POLL_MS = 60_000;
 const TIMER_ACTIVE_POLL_MS = 10_000;
 const PENDING_RESULT_SAVES_STORAGE_KEY = "now-padel:nonstop:pending-results";
 const SCORE_DRAFTS_STORAGE_KEY = "now-padel:nonstop:score-drafts";
+const NONSTOP_FINALIZED_STORAGE_KEY = "now-padel:nonstop:last-finalized-event";
+const CLOSING_PRESENTATION_TABS = ["Campeões", "Non Stop"];
+const CLOSING_PRESENTATION_TAB_MS = 12_000;
+const CLOSING_PRESENTATION_RANKING_LIMIT = 10;
 
 const formatPoints = (value: number) => (
   Number.isInteger(value)
@@ -172,10 +198,17 @@ export default function Nonstop() {
   const [isActive, setIsActive] = useState(false);
   const [round, setRound] = useState(1);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
+  const [isClosingPresentationActive, setIsClosingPresentationActive] = useState(false);
+  const [closingPresentationSlide, setClosingPresentationSlide] = useState(0);
+  const [dismissedClosingEventId, setDismissedClosingEventId] = useState<number | null>(null);
+  const [presentationFinalizedEventId, setPresentationFinalizedEventId] = useState<number | null>(null);
+  const liveDataPollMs = isPresentationMode && isClosingPresentationActive
+    ? CLOSING_PRESENTATION_TAB_MS
+    : NONSTOP_LIVE_DATA_POLL_MS;
 
   const { data: currentEvent } = useQuery<NonstopEventSummary>({
     queryKey: ["/api/nonstop/current"],
-    refetchInterval: NONSTOP_EVENT_POLL_MS,
+    refetchInterval: isPresentationMode ? liveDataPollMs : NONSTOP_EVENT_POLL_MS,
     refetchOnWindowFocus: true,
   });
 
@@ -185,9 +218,42 @@ export default function Nonstop() {
     refetchOnWindowFocus: true,
   });
 
+  const { data: presentationFinalizedDetails } = useQuery<NonstopEventDetails>({
+    queryKey: [`/api/nonstop/events/${presentationFinalizedEventId}`],
+    enabled: Boolean(isPresentationMode && presentationFinalizedEventId),
+    queryFn: async () => {
+      const res = await fetch(`/api/nonstop/events/${presentationFinalizedEventId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Nao foi possivel carregar o Non Stop finalizado.");
+      return res.json();
+    },
+    refetchInterval: isPresentationMode && presentationFinalizedEventId ? liveDataPollMs : false,
+    refetchOnWindowFocus: true,
+  });
+
+  const activateFinalizedPresentation = useCallback((eventId: number) => {
+    if (!Number.isInteger(eventId) || eventId < 1) return;
+    setPresentationFinalizedEventId(eventId);
+    setIsClosingPresentationActive(true);
+    setClosingPresentationSlide(0);
+    queryClient.invalidateQueries({ queryKey: [`/api/nonstop/events/${eventId}`] });
+    queryClient.invalidateQueries({ queryKey: [`/api/teams?eventId=${eventId}`] });
+    queryClient.invalidateQueries({ queryKey: [`/api/results?eventId=${eventId}`] });
+    queryClient.invalidateQueries({ queryKey: ["/api/ranking"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/ranking/history"] });
+  }, []);
+
   const selectedHistoryEvent = events.find((event) => event.id === selectedHistoryEventId) ?? null;
   const readOnlyMode = viewMode === "history";
   const editableEvent = currentEvent ?? null;
+  const finalizedPresentationEvent = presentationFinalizedDetails?.event
+    ?? events.find((event) => event.id === presentationFinalizedEventId)
+    ?? null;
+  const presentationDisplayEvent = presentationFinalizedEventId
+    ? (finalizedPresentationEvent ?? editableEvent)
+    : editableEvent;
+  const presentationLockedEventId = isPresentationMode && presentationFinalizedEventId
+    ? presentationFinalizedEventId
+    : null;
   const [eventDateInput, setEventDateInput] = useState(toLisbonDayKey(new Date()));
   const [eventTimeInput, setEventTimeInput] = useState("21:30");
   const [eventCategoryInput, setEventCategoryInput] = useState(DEFAULT_NONSTOP_CATEGORY);
@@ -234,6 +300,39 @@ export default function Nonstop() {
     () => new Map(availablePlayers.map((player) => [player.id, player])),
     [availablePlayers],
   );
+
+  const createPlayerFromTeamMutation = useMutation({
+    mutationFn: async (data: any): Promise<Player> => {
+      const res = await apiRequest("POST", "/api/players", data);
+      return res.json();
+    },
+    onSuccess: (player) => {
+      queryClient.setQueryData<PlayersPageResponse>(["/api/players", "all"], (current) => {
+        const currentItems = current?.items ?? [];
+        const nextItems = [
+          ...currentItems.filter((item) => item.id !== player.id),
+          player,
+        ];
+
+        return {
+          items: nextItems,
+          total: Math.max(current?.total ?? 0, nextItems.length),
+          page: current?.page ?? 1,
+          pageSize: current?.pageSize ?? nextItems.length,
+          totalPages: current?.totalPages ?? 1,
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/players"] });
+      toast({ title: "Sucesso", description: "Jogador criado e disponível para a dupla" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro",
+        description: error?.message || "Não foi possível criar o jogador.",
+        variant: "destructive",
+      });
+    },
+  });
   const getLinkedPlayersDisplay = (team: Team) => {
     const linkedPlayers = [team.playerAId, team.playerBId]
       .filter((id): id is number => typeof id === "number" && id > 0)
@@ -253,27 +352,37 @@ export default function Nonstop() {
     return "Dupla sem nome";
   };
 
-  const teamsQueryKey = readOnlyMode && selectedHistoryEventId
+  const viewedHistoricalEventId = readOnlyMode && selectedHistoryEventId
+    ? selectedHistoryEventId
+    : presentationLockedEventId;
+
+  const teamsQueryKey = viewedHistoricalEventId
+    ? `/api/teams?eventId=${viewedHistoricalEventId}`
+    : readOnlyMode && selectedHistoryEventId
     ? `/api/teams?eventId=${selectedHistoryEventId}`
     : "/api/teams";
 
   const { data: teams } = useQuery<Team[]>({
     queryKey: [teamsQueryKey],
-    refetchInterval: NONSTOP_LIVE_DATA_POLL_MS,
+    refetchInterval: liveDataPollMs,
     refetchOnWindowFocus: true,
   });
 
-  const resultsQueryKey = readOnlyMode && selectedHistoryEventId
+  const resultsQueryKey = viewedHistoricalEventId
+    ? `/api/results?eventId=${viewedHistoricalEventId}`
+    : readOnlyMode && selectedHistoryEventId
     ? `/api/results?eventId=${selectedHistoryEventId}`
     : "/api/results";
 
   const { data: results } = useQuery<NonstopResult[]>({
     queryKey: [resultsQueryKey],
-    refetchInterval: NONSTOP_LIVE_DATA_POLL_MS,
+    refetchInterval: liveDataPollMs,
     refetchOnWindowFocus: true,
   });
 
-  const timerQueryKey = readOnlyMode && selectedHistoryEventId
+  const timerQueryKey = viewedHistoricalEventId
+    ? `/api/nonstop/timer?eventId=${viewedHistoricalEventId}`
+    : readOnlyMode && selectedHistoryEventId
     ? `/api/nonstop/timer?eventId=${selectedHistoryEventId}`
     : "/api/nonstop/timer";
   const timerRefetchInterval = readOnlyMode
@@ -308,6 +417,10 @@ export default function Nonstop() {
   const lastSoundLockCleanupRef = useRef(0);
   const resultSaveQueueRef = useRef<Map<string, Promise<void>>>(new Map());
   const pendingResultSavesRef = useRef<Map<string, any>>(new Map());
+  const lastPresentationEventRef = useRef<{
+    event: NonstopEventSummary;
+    hadPlayedResults: boolean;
+  } | null>(null);
   const lastSyncedTimerSnapshotRef = useRef<{
     timerState: TimerState;
     isActive: boolean;
@@ -321,7 +434,7 @@ export default function Nonstop() {
   const warmupMinutes = settings?.warmupTime ?? 0;
   const gameMinutes = settings?.gameTime ?? 20;
   const totalRounds = settings?.nonstopRounds ?? 5;
-  const isSelectedHistoryMode = readOnlyMode && Boolean(selectedHistoryEventId);
+  const isSelectedHistoryMode = Boolean(viewedHistoricalEventId);
   const historyNumRounds = useMemo(
     () => Math.max(0, ...(results ?? []).map((result) => result.round || 0)),
     [results],
@@ -421,6 +534,42 @@ export default function Nonstop() {
   const currentEventCategoryKey = editableEvent
     ? (editableEvent.category || configuredCategories[0] || DEFAULT_NONSTOP_CATEGORY)
     : "";
+  const currentEventSeasonYear = editableEvent
+    ? Number(toLisbonDayKey(editableEvent.startedAt ?? editableEvent.createdAt).slice(0, 4)) || new Date().getFullYear()
+    : new Date().getFullYear();
+  const rankingContextEvent = presentationFinalizedEventId
+    ? presentationDisplayEvent
+    : editableEvent;
+  const rankingContextCategoryKey = rankingContextEvent
+    ? (rankingContextEvent.category || configuredCategories[0] || DEFAULT_NONSTOP_CATEGORY)
+    : currentEventCategoryKey;
+  const rankingContextSeasonYear = rankingContextEvent
+    ? Number(toLisbonDayKey(rankingContextEvent.startedAt ?? rankingContextEvent.createdAt).slice(0, 4)) || currentEventSeasonYear
+    : currentEventSeasonYear;
+  const rankingPreviewCategory = rankingContextCategoryKey || eventCategoryInput || DEFAULT_NONSTOP_CATEGORY;
+  const rankingPreviewQuery = useQuery<RankingPreviewResponse>({
+    queryKey: ["/api/ranking", "closing-preview", rankingContextSeasonYear, rankingPreviewCategory, presentationFinalizedEventId ?? "live"],
+    enabled: Boolean(
+      isPresentationMode &&
+        isClosingPresentationActive &&
+        CLOSING_PRESENTATION_TABS.includes("Ranking") &&
+        rankingPreviewCategory &&
+        !readOnlyMode
+    ),
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set("season", String(rankingContextSeasonYear));
+      params.set("category", rankingPreviewCategory);
+      params.set("onlyWithPoints", "0");
+      params.set("page", "1");
+      params.set("pageSize", "100");
+      const res = await fetch(`/api/ranking?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Não foi possível carregar o ranking.");
+      return res.json();
+    },
+    refetchInterval: isClosingPresentationActive ? liveDataPollMs : false,
+    refetchOnWindowFocus: true,
+  });
   const hasEventMetadataChanges = Boolean(
     editableEvent &&
       eventDateInput &&
@@ -441,6 +590,26 @@ export default function Nonstop() {
       category: eventCategoryInput,
     });
   };
+
+  useEffect(() => {
+    if (!isPresentationMode || readOnlyMode) return;
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== NONSTOP_FINALIZED_STORAGE_KEY || !event.newValue) return;
+      try {
+        const payload = JSON.parse(event.newValue) as { completedEventId?: unknown };
+        const eventId = Number(payload.completedEventId);
+        if (Number.isInteger(eventId) && eventId > 0) {
+          activateFinalizedPresentation(eventId);
+        }
+      } catch {
+        // ignore malformed cross-tab payloads
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [activateFinalizedPresentation, isPresentationMode, readOnlyMode]);
 
   const syncTimerMutation = useMutation({
     mutationFn: async (payload: {
@@ -1656,10 +1825,22 @@ export default function Nonstop() {
         await saveEventMetadata();
       }
       const res = await apiRequest("POST", "/api/nonstop/finalize-and-start", {});
-      return res.json();
+      return res.json() as Promise<NonstopFinalizeResponse>;
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       clearScheduledSounds();
+      try {
+        window.localStorage.setItem(
+          NONSTOP_FINALIZED_STORAGE_KEY,
+          JSON.stringify({
+            completedEventId: result.completedEventId,
+            newEventId: result.newEvent?.id ?? null,
+            at: Date.now(),
+          }),
+        );
+      } catch {
+        // storage can be unavailable in restricted browser modes
+      }
       setViewMode("current");
       setSelectedHistoryEventId(null);
       queryClient.invalidateQueries({ queryKey: ["/api/nonstop/current"] });
@@ -1672,12 +1853,12 @@ export default function Nonstop() {
       queryClient.invalidateQueries({ queryKey: ["/api/ranking"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ranking/history"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ranking/entries"] });
-      toast({ title: "Sucesso", description: "Evento finalizado e novo Non Stop iniciado" });
+      toast({ title: "Sucesso", description: "Non Stop arquivado e pontos atualizados no ranking" });
     },
     onError: (error: any) => {
       toast({
         title: "Erro",
-        description: error?.message || "Não foi possível finalizar o evento.",
+        description: error?.message || "Não foi possível finalizar o evento e atualizar os pontos.",
         variant: "destructive",
       });
     },
@@ -2073,6 +2254,240 @@ export default function Nonstop() {
   };
 
   const stats = getStandings();
+  const playedResults = useMemo(
+    () =>
+      [...(results ?? [])]
+        .filter((result) => result.scoreA > 0 || result.scoreB > 0)
+        .sort((a, b) => (a.round - b.round) || (a.court - b.court)),
+    [results],
+  );
+  const finalScheduledResults = useMemo(() => {
+    const bySlot = new Map<string, NonstopResult>();
+    for (const result of results ?? []) {
+      if (
+        result.round < 1 ||
+        result.round > displayNumRounds ||
+        result.court < 1 ||
+        result.court > displayNumCourts
+      ) {
+        continue;
+      }
+      bySlot.set(getResultKey(result.round, result.court), result);
+    }
+
+    return Array.from({ length: displayNumRounds }).flatMap((_, roundIndex) =>
+      Array.from({ length: displayNumCourts }).map((__, courtIndex) =>
+        bySlot.get(getResultKey(roundIndex + 1, courtIndex + 1)),
+      ),
+    );
+  }, [displayNumCourts, displayNumRounds, results]);
+  const isFinalResultComplete = (result?: NonstopResult) => {
+    if (!result?.teamAId || !result?.teamBId) return false;
+    const scoreA = typeof result.scoreA === "number" ? result.scoreA : null;
+    const scoreB = typeof result.scoreB === "number" ? result.scoreB : null;
+    return scoreA !== null && scoreB !== null && (scoreA > 0 || scoreB > 0);
+  };
+  const completedFinalResultsCount = finalScheduledResults.filter(isFinalResultComplete).length;
+  const allFinalResultsComplete = Boolean(
+    finalScheduledResults.length > 0 &&
+      completedFinalResultsCount === finalScheduledResults.length,
+  );
+  const closingPresentationShouldActivate = Boolean(
+    isPresentationMode &&
+      !readOnlyMode &&
+      editableEvent &&
+      editableEvent.id !== dismissedClosingEventId &&
+      allFinalResultsComplete &&
+      (
+        (isActive && timerState === "game" && round >= totalRounds && timeLeft <= 0) ||
+        (!isActive && timerState === "idle" && round >= totalRounds)
+      ),
+  );
+  const closingPodium = stats.slice(0, 3);
+  const finalEventTitle = presentationDisplayEvent?.label || presentationDisplayEvent?.category || eventCategoryInput || DEFAULT_NONSTOP_CATEGORY;
+  const finalEventDateLabel = presentationDisplayEvent
+    ? format(new Date(presentationDisplayEvent.startedAt ?? presentationDisplayEvent.createdAt), "dd/MM/yyyy HH:mm")
+    : "";
+  const eventPointDeltas = useMemo(() => {
+    const deltas = new Map<number, { points: number; participationCount: number; roundWins: number }>();
+    const teamPlayers = new Map<number, number[]>();
+    const eventTeams = teams ?? [];
+    const roundWinPoints = resolveNonstopRoundWinPoints(displayNumRounds);
+
+    for (const team of eventTeams) {
+      const playerIds = [team.playerAId, team.playerBId]
+        .filter((id): id is number => typeof id === "number" && id > 0);
+      teamPlayers.set(team.id, Array.from(new Set(playerIds)));
+      for (const playerId of playerIds) {
+        const current = deltas.get(playerId) ?? { points: 0, participationCount: 0, roundWins: 0 };
+        current.points += 2;
+        current.participationCount += 1;
+        deltas.set(playerId, current);
+      }
+    }
+
+    for (const result of playedResults) {
+      const winnerTeamId = result.scoreA > result.scoreB
+        ? result.teamAId
+        : result.scoreB > result.scoreA
+          ? result.teamBId
+          : null;
+      if (!winnerTeamId) continue;
+
+      const winnerPlayers = teamPlayers.get(winnerTeamId) ?? [];
+      for (const playerId of winnerPlayers) {
+        const current = deltas.get(playerId) ?? { points: 0, participationCount: 0, roundWins: 0 };
+        current.points += roundWinPoints;
+        current.roundWins += 1;
+        deltas.set(playerId, current);
+      }
+    }
+
+    return deltas;
+  }, [teams, playedResults, displayNumRounds]);
+  const projectedRankingTop = useMemo(() => {
+    const rows = new Map<number, {
+      playerId: number;
+      name: string;
+      totalPoints: number;
+      participationCount: number;
+      roundWins: number;
+      eventPoints: number;
+    }>();
+
+    for (const row of rankingPreviewQuery.data?.items ?? []) {
+      rows.set(row.playerId, {
+        playerId: row.playerId,
+        name: row.name,
+        totalPoints: row.totalPoints,
+        participationCount: row.participationCount,
+        roundWins: row.roundWins,
+        eventPoints: 0,
+      });
+    }
+
+    const isOfficialFinalRanking = Boolean(presentationFinalizedEventId);
+
+    eventPointDeltas.forEach((delta, playerId) => {
+      const player = playersById.get(playerId);
+      const current = rows.get(playerId) ?? {
+        playerId,
+        name: player?.name ?? `Jogador #${playerId}`,
+        totalPoints: 0,
+        participationCount: 0,
+        roundWins: 0,
+        eventPoints: 0,
+      };
+
+      if (!isOfficialFinalRanking) {
+        current.totalPoints += delta.points;
+        current.participationCount += delta.participationCount;
+        current.roundWins += delta.roundWins;
+      }
+      current.eventPoints += delta.points;
+      rows.set(playerId, current);
+    });
+
+    return Array.from(rows.values())
+      .filter((row) => row.totalPoints !== 0 || row.participationCount > 0 || row.roundWins > 0)
+      .sort((a, b) => {
+        if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+        return a.name.localeCompare(b.name, "pt-PT", { sensitivity: "base" });
+      })
+      .map((row, index) => ({ ...row, position: index + 1 }));
+  }, [eventPointDeltas, playersById, presentationFinalizedEventId, rankingPreviewQuery.data?.items]);
+
+  useEffect(() => {
+    if (!isPresentationMode || readOnlyMode || presentationFinalizedEventId || !currentEvent) return;
+    const previous = lastPresentationEventRef.current;
+    if (
+      previous &&
+      previous.event.id !== currentEvent.id &&
+      previous.hadPlayedResults
+    ) {
+      activateFinalizedPresentation(previous.event.id);
+    }
+  }, [
+    activateFinalizedPresentation,
+    currentEvent?.id,
+    isPresentationMode,
+    presentationFinalizedEventId,
+    readOnlyMode,
+  ]);
+
+  useEffect(() => {
+    if (!isPresentationMode || readOnlyMode || presentationFinalizedEventId || !editableEvent) return;
+    const hadPlayedResults = playedResults.length > 0 || stats.length > 0;
+    lastPresentationEventRef.current = {
+      event: editableEvent,
+      hadPlayedResults,
+    };
+  }, [
+    editableEvent?.id,
+    editableEvent?.startedAt,
+    editableEvent?.createdAt,
+    editableEvent?.category,
+    editableEvent?.label,
+    isPresentationMode,
+    playedResults.length,
+    presentationFinalizedEventId,
+    readOnlyMode,
+    stats.length,
+  ]);
+
+  useEffect(() => {
+    if (closingPresentationShouldActivate) {
+      setIsClosingPresentationActive(true);
+    }
+  }, [closingPresentationShouldActivate]);
+
+  useEffect(() => {
+    if (!isPresentationMode || readOnlyMode || presentationFinalizedEventId) return;
+    if (isClosingPresentationActive && !closingPresentationShouldActivate) {
+      setIsClosingPresentationActive(false);
+      setClosingPresentationSlide(0);
+    }
+  }, [
+    closingPresentationShouldActivate,
+    isClosingPresentationActive,
+    isPresentationMode,
+    presentationFinalizedEventId,
+    readOnlyMode,
+  ]);
+
+  useEffect(() => {
+    if (!isPresentationMode || readOnlyMode) {
+      setIsClosingPresentationActive(false);
+      setClosingPresentationSlide(0);
+      setPresentationFinalizedEventId(null);
+      lastPresentationEventRef.current = null;
+    }
+  }, [isPresentationMode, readOnlyMode]);
+
+  useEffect(() => {
+    if (closingPresentationSlide >= CLOSING_PRESENTATION_TABS.length) {
+      setClosingPresentationSlide(0);
+    }
+  }, [closingPresentationSlide]);
+
+  useEffect(() => {
+    if (isPresentationMode) return;
+    setIsClosingPresentationActive(false);
+    setClosingPresentationSlide(0);
+    setDismissedClosingEventId(null);
+    setPresentationFinalizedEventId(null);
+  }, [editableEvent?.id, isPresentationMode]);
+
+  useEffect(() => {
+    if (!isClosingPresentationActive) return;
+
+    const interval = window.setInterval(() => {
+      setClosingPresentationSlide((current) => (current + 1) % CLOSING_PRESENTATION_TABS.length);
+    }, CLOSING_PRESENTATION_TAB_MS);
+
+    return () => window.clearInterval(interval);
+  }, [isClosingPresentationActive]);
+
   const daysWithEvents = events.map((event) => new Date(event.startedAt ?? event.createdAt));
   const showHistoryEmptyState = viewMode === "history" && !selectedHistoryEventId;
   const selectedHistoryEventDateLabel = selectedHistoryEvent
@@ -2088,12 +2503,728 @@ export default function Nonstop() {
     : eventsForSelectedDate.length === 1
     ? "Escolhe um dia no calendário para carregar o histórico."
     : "Este dia tem mais do que um Non Stop. Escolhe o horário para carregar os resultados.";
+  const renderClosingPresentationSlide = () => {
+    if (closingPresentationSlide === 0) {
+      const podiumOrder = [
+        { team: closingPodium[1], position: 2, label: "2.º", height: "lg:min-h-[340px]", tone: "bg-white/10 border-white/15 text-white" },
+        { team: closingPodium[0], position: 1, label: "1.º", height: "lg:min-h-[430px]", tone: "bg-orange-500 border-orange-300 text-slate-950" },
+        { team: closingPodium[2], position: 3, label: "3.º", height: "lg:min-h-[300px]", tone: "bg-white/10 border-white/15 text-white" },
+      ].filter((slot) => Boolean(slot.team));
+      return (
+        <div className="space-y-4">
+          <div className="grid min-h-[440px] grid-cols-1 items-end gap-4 lg:grid-cols-3">
+            {podiumOrder.map(({ team, position, label, height, tone }: any) => {
+            const isWinner = position === 1;
+            const sequence = Array.isArray(team.sequence) ? team.sequence : [];
+            const diff = team.gamesWon - team.gamesLost;
+            const statTone = isWinner ? "bg-white/25 text-slate-950" : "bg-white/10 text-white";
+            return (
+              <div
+                key={`closing-podium-${team.teamId}`}
+                className={cn(
+                  "relative flex flex-col justify-between overflow-hidden rounded-md border p-5 shadow-2xl",
+                  height,
+                  tone,
+                )}
+              >
+                <div className={cn("absolute inset-x-0 top-0 h-1", isWinner ? "bg-slate-950" : position === 2 ? "bg-slate-300" : "bg-orange-300")} />
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <span className={cn("text-xs font-black uppercase tracking-[0.28em]", isWinner ? "text-slate-900" : "text-orange-200")}>
+                      {isWinner ? "Campeões" : `${label} lugar`}
+                    </span>
+                    <p className={cn("mt-2 text-6xl font-black leading-none", !isWinner && "text-5xl text-orange-200")}>
+                      {label}
+                    </p>
+                  </div>
+                  <div className={cn("flex h-16 w-16 shrink-0 items-center justify-center rounded-md", isWinner ? "bg-slate-950 text-orange-400" : "bg-white/10 text-orange-300")}>
+                    {isWinner ? <Trophy className="h-10 w-10" /> : <Medal className="h-9 w-9" />}
+                  </div>
+                </div>
+                <div className="hidden">
+                  <span className={cn("text-sm font-bold uppercase tracking-[0.28em]", isWinner ? "text-slate-900" : "text-orange-200")}>
+                    {position}.º lugar
+                  </span>
+                  {isWinner ? <Trophy className="h-10 w-10" /> : <Medal className="h-8 w-8 text-orange-300" />}
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <p className={cn("break-words text-4xl font-black leading-tight", !isWinner && "text-3xl")}>
+                      {normalizeTeamName(team.name)}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {sequence.map((char: string, index: number) => (
+                        <span
+                          key={`closing-podium-form-${team.teamId}-${index}`}
+                          className={cn(
+                            "flex h-7 w-7 items-center justify-center rounded-md border text-xs font-black",
+                            char === "V"
+                              ? "border-green-500/30 bg-green-100 text-green-800"
+                              : char === "D"
+                              ? "border-red-500/30 bg-red-100 text-red-800"
+                              : isWinner
+                              ? "border-slate-950/20 bg-white/30 text-slate-950"
+                              : "border-white/15 bg-white/10 text-white",
+                          )}
+                        >
+                          {char}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className={cn("rounded-md p-3", statTone)}>
+                      <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Pontos</p>
+                      <p className="mt-1 text-3xl font-black">{formatPoints(team.points)}</p>
+                    </div>
+                    <div className={cn("rounded-md p-3", statTone)}>
+                      <p className="text-[10px] font-black uppercase tracking-widest opacity-80">JG</p>
+                      <p className="mt-1 text-3xl font-black">{team.gamesWon}</p>
+                    </div>
+                    <div className={cn("rounded-md p-3", statTone)}>
+                      <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Dif.</p>
+                      <p className="mt-1 text-3xl font-black">{diff > 0 ? `+${diff}` : diff}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+            })}
+          </div>
+          {closingPodium.length === 0 ? (
+            <div className="rounded-md border border-white/15 bg-white/10 p-8 text-center text-white">
+              Ainda não há classificação disponível para apresentar.
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    if (closingPresentationSlide === 1) {
+      return (
+        <div className="overflow-hidden rounded-md border border-white/15 bg-white text-slate-950 shadow-2xl">
+          <div className="bg-orange-600 px-5 py-3 text-center text-sm font-black uppercase tracking-[0.28em] text-white">
+            Classificação final do Non Stop
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-slate-950 hover:bg-slate-950">
+                <TableHead className="w-16 text-white">#</TableHead>
+                <TableHead className="text-white">Dupla</TableHead>
+                <TableHead className="text-center text-white">Pontos</TableHead>
+                <TableHead className="text-center text-white">JG</TableHead>
+                <TableHead className="text-center text-white">JP</TableHead>
+                <TableHead className="text-center text-white">Dif.</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {stats.map((team: any, index: number) => (
+                <TableRow key={`closing-standing-${team.teamId}`} className={cn(index < 3 && "bg-orange-50")}>
+                  <TableCell className="text-lg font-black">{index + 1}</TableCell>
+                  <TableCell className="break-words text-lg font-bold">{normalizeTeamName(team.name)}</TableCell>
+                  <TableCell className="text-center text-lg font-black text-orange-600">{formatPoints(team.points)}</TableCell>
+                  <TableCell className="text-center font-semibold">{team.gamesWon}</TableCell>
+                  <TableCell className="text-center font-semibold">{team.gamesLost}</TableCell>
+                  <TableCell className="text-center font-semibold">{team.gamesWon - team.gamesLost}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      );
+    }
+
+    if (closingPresentationSlide === 2) {
+      const resultLookup = new Map(
+        (results ?? []).map((result) => [`${result.round}-${result.court}`, result]),
+      );
+
+      const renderTeamResultPanel = (
+        team: Team | undefined,
+        score: number | null,
+        isWinner: boolean,
+        align: "left" | "right",
+      ) => (
+        <div
+          className={cn(
+            "flex min-h-14 items-center gap-3 rounded-md border px-3 py-2",
+            align === "right" && "flex-row-reverse text-right",
+            isWinner
+              ? "border-green-500/40 bg-green-50 text-green-950"
+              : "border-slate-200 bg-white text-slate-900",
+          )}
+        >
+          <div className={cn(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-lg font-black tabular-nums",
+            isWinner ? "bg-green-600 text-white" : "bg-slate-100 text-slate-700",
+          )}>
+            {score ?? "-"}
+          </div>
+          <div className="min-w-0">
+            <p className={cn("break-words text-sm font-black leading-tight", isWinner && "text-green-900")}>
+              {team ? getTeamOptionLabel(team) : "Dupla por definir"}
+            </p>
+            <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+              {isWinner ? "Vitória" : "Resultado"}
+            </p>
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
+          {Array.from({ length: displayNumRounds }).map((_, roundIndex) => {
+            const roundNum = roundIndex + 1;
+            const roundResults = Array.from({ length: displayNumCourts })
+              .map((__, courtIndex) => resultLookup.get(`${roundNum}-${courtIndex + 1}`))
+              .filter(Boolean);
+            const playedInRound = roundResults.filter((result) => result && (result.scoreA > 0 || result.scoreB > 0)).length;
+
+            return (
+              <div key={`closing-round-${roundNum}`} className="overflow-hidden rounded-md border border-orange-500/60 bg-white text-slate-950 shadow-xl">
+                <div className="flex items-center justify-between bg-orange-600 px-4 py-2 text-white">
+                  <p className="text-sm font-black uppercase tracking-[0.24em]">Ronda {roundNum}</p>
+                  <p className="text-xs font-bold text-orange-100">{playedInRound}/{displayNumCourts} jogos</p>
+                </div>
+                <div className="divide-y divide-slate-100 bg-slate-50">
+                  {Array.from({ length: displayNumCourts }).map((__, courtIndex) => {
+                    const courtNum = courtIndex + 1;
+                    const matchResult = resultLookup.get(`${roundNum}-${courtNum}`);
+                    const teamA = teams?.find((team) => team.id === matchResult?.teamAId);
+                    const teamB = teams?.find((team) => team.id === matchResult?.teamBId);
+                    const scoreA = typeof matchResult?.scoreA === "number" ? matchResult.scoreA : null;
+                    const scoreB = typeof matchResult?.scoreB === "number" ? matchResult.scoreB : null;
+                    const hasPlayed = scoreA !== null && scoreB !== null && (scoreA > 0 || scoreB > 0);
+                    const isTeamAWinner = Boolean(hasPlayed && scoreA! > scoreB!);
+                    const isTeamBWinner = Boolean(hasPlayed && scoreB! > scoreA!);
+
+                    return (
+                      <div key={`closing-round-${roundNum}-court-${courtNum}`} className="p-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="rounded-md bg-slate-950 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white">
+                            Campo {courtNum}
+                          </span>
+                          <span className={cn(
+                            "text-[10px] font-black uppercase tracking-widest",
+                            hasPlayed ? "text-green-700" : "text-slate-400",
+                          )}>
+                            {hasPlayed ? "Finalizado" : "Por jogar"}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-2">
+                          {renderTeamResultPanel(teamA, scoreA, isTeamAWinner, "left")}
+                          <div className="flex h-full min-h-14 w-10 items-center justify-center rounded-md bg-slate-950 text-xs font-black uppercase tracking-widest text-white">
+                            vs
+                          </div>
+                          {renderTeamResultPanel(teamB, scoreB, isTeamBWinner, "right")}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    return (
+      <div className="overflow-hidden rounded-md border border-white/15 bg-white text-slate-950 shadow-2xl">
+        <div className="flex items-center justify-between gap-3 bg-slate-950 px-5 py-3 text-white">
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.28em] text-orange-300">Top {CLOSING_PRESENTATION_RANKING_LIMIT}</p>
+            <h3 className="text-2xl font-black">
+              {presentationFinalizedEventId ? "Ranking atualizado" : "Ranking projetado"}
+            </h3>
+          </div>
+          <p className="max-w-sm text-right text-sm text-slate-300">
+            {presentationFinalizedEventId
+              ? "Pontos oficiais ja atualizados apos finalizar o Non Stop."
+              : "Inclui os pontos deste Non Stop. Fica oficial apos finalizar e atualizar pontos."}
+          </p>
+        </div>
+        {rankingPreviewQuery.isLoading ? (
+          <div className="p-8 text-center text-muted-foreground">A carregar ranking...</div>
+        ) : projectedRankingTop.length === 0 ? (
+          <div className="p-8 text-center text-muted-foreground">Ainda não há jogadores com pontos nesta categoria.</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-orange-600 hover:bg-orange-600">
+                <TableHead className="w-16 text-white">#</TableHead>
+                <TableHead className="text-white">Jogador</TableHead>
+                <TableHead className="text-center text-white">Part.</TableHead>
+                <TableHead className="text-center text-white">Vit.</TableHead>
+                <TableHead className="text-right text-white">Pontos</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {projectedRankingTop.map((player) => (
+                <TableRow key={`closing-ranking-${player.playerId}`} className={cn(player.position <= 3 && "bg-orange-50")}>
+                  <TableCell className="text-lg font-black">{player.position}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-col">
+                      <span className="text-base font-bold">{player.name}</span>
+                      {player.eventPoints > 0 ? (
+                        <span className="text-xs font-semibold text-orange-600">+{formatPoints(player.eventPoints)} neste Non Stop</span>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-center font-semibold">{player.participationCount}</TableCell>
+                  <TableCell className="text-center font-semibold">{player.roundWins}</TableCell>
+                  <TableCell className="text-right text-lg font-black text-orange-600">{formatPoints(player.totalPoints)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    );
+  };
+
+  const renderSimpleClosingPresentationView = () => {
+    if (closingPresentationSlide === 0) {
+      const champion = closingPodium[0];
+      const runnerUp = closingPodium[1];
+      const thirdPlace = closingPodium[2];
+      const confettiColors = ["#f97316", "#ffffff", "#fb923c", "#111827", "#fdba74"];
+
+      return (
+        <div className="relative flex min-h-[calc(100vh-92px)] overflow-hidden rounded-md bg-[#050916] p-4 text-white shadow-2xl shadow-slate-950/40 ring-1 ring-white/10 max-[900px]:min-h-[calc(100vh-56px)] max-[900px]:p-2">
+          <style>
+            {`
+              @keyframes np-confetti-fall {
+                0% { transform: translate3d(0, -20vh, 0) rotate(0deg); opacity: 0; }
+                10% { opacity: 1; }
+                100% { transform: translate3d(var(--np-confetti-drift), 110vh, 0) rotate(720deg); opacity: 0; }
+              }
+              @keyframes np-champion-pop {
+                0%, 100% { transform: translateY(0) scale(1); }
+                50% { transform: translateY(-6px) scale(1.02); }
+              }
+              @keyframes np-winner-ring-spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+              }
+              @keyframes np-winner-ring-pulse {
+                0%, 100% { opacity: 0.28; transform: scale(0.94); }
+                50% { opacity: 0.72; transform: scale(1.04); }
+              }
+              @keyframes np-celebration-sweep {
+                0% { transform: translateX(-45%) skewX(-14deg); opacity: 0; }
+                18% { opacity: 0.55; }
+                55%, 100% { transform: translateX(145%) skewX(-14deg); opacity: 0; }
+              }
+              @keyframes np-stat-shimmer {
+                0% { transform: translateX(-130%) skewX(-18deg); opacity: 0; }
+                22% { opacity: 0.5; }
+                54%, 100% { transform: translateX(140%) skewX(-18deg); opacity: 0; }
+              }
+              @keyframes np-title-breathe {
+                0%, 100% { text-shadow: 0 0 0 rgba(253, 186, 116, 0); }
+                50% { text-shadow: 0 0 28px rgba(253, 186, 116, 0.26); }
+              }
+              @keyframes np-firework-pop {
+                0% { transform: scale(0.25); opacity: 0; }
+                12% { opacity: 0.65; }
+                100% { transform: scale(1.35); opacity: 0; }
+              }
+            `}
+          </style>
+          <div className="pointer-events-none absolute -left-28 top-1/2 h-[420px] w-[420px] -translate-y-1/2 rounded-full bg-orange-600/20 blur-3xl" />
+          <div className="pointer-events-none absolute -right-24 top-12 h-80 w-80 rounded-full bg-white/5 blur-3xl" />
+          <div
+            className="pointer-events-none absolute inset-y-0 left-0 z-0 w-1/2 bg-gradient-to-r from-transparent via-orange-300/10 to-transparent"
+            style={{ animation: "np-celebration-sweep 4.8s ease-in-out infinite" }}
+          />
+          <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <span
+                key={`champion-firework-${index}`}
+                className="absolute h-24 w-24 rounded-full border border-orange-200/20 shadow-[0_0_42px_rgba(249,115,22,0.18)]"
+                style={{
+                  left: `${12 + ((index * 19) % 76)}%`,
+                  top: `${8 + ((index * 23) % 64)}%`,
+                  animation: `np-firework-pop ${3.4 + index * 0.22}s ease-out infinite`,
+                  animationDelay: `${index * 0.7}s`,
+                }}
+              />
+            ))}
+          </div>
+          <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+            {Array.from({ length: 34 }).map((_, index) => (
+              <span
+                key={`champion-confetti-${index}`}
+                className="absolute block h-9 w-1.5 rounded-full opacity-0"
+                style={{
+                  left: `${(index * 11) % 100}%`,
+                  top: "-12%",
+                  backgroundColor: confettiColors[index % confettiColors.length],
+                  animation: `np-confetti-fall ${5.8 + (index % 5) * 0.6}s linear infinite`,
+                  animationDelay: `${(index % 12) * -0.45}s`,
+                  transform: `rotate(${index * 17}deg)`,
+                  ["--np-confetti-drift" as any]: `${(index % 2 === 0 ? 1 : -1) * (36 + (index % 7) * 9)}px`,
+                }}
+              />
+            ))}
+          </div>
+
+          <div className="relative z-10 grid w-full grid-cols-1 items-center gap-5 lg:grid-cols-[0.78fr_1.22fr] max-[900px]:gap-2">
+            <motion.div
+              initial={{ opacity: 0, x: -34, scale: 0.92 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
+              className="flex items-center justify-center"
+            >
+              <div className="relative flex aspect-square w-full max-w-[320px] items-center justify-center rounded-full border border-orange-300/50 bg-gradient-to-br from-orange-500 to-orange-700 shadow-[0_0_80px_rgba(249,115,22,0.28)] max-[900px]:max-w-[150px]">
+                <div
+                  className="absolute -inset-6 rounded-full border border-orange-200/20 max-[900px]:-inset-3"
+                  style={{ animation: "np-winner-ring-pulse 2.9s ease-in-out infinite" }}
+                />
+                <div
+                  className="absolute -inset-3 rounded-full border border-transparent border-r-orange-300/25 border-t-orange-200/50 max-[900px]:-inset-1.5"
+                  style={{ animation: "np-winner-ring-spin 7.5s linear infinite" }}
+                />
+                <div className="absolute inset-3 rounded-full border border-white/25" />
+                <div className="absolute inset-8 rounded-full bg-slate-950/95 shadow-inner" />
+                <Trophy
+                  className="relative z-10 h-36 w-36 text-orange-200 drop-shadow-2xl max-[900px]:h-20 max-[900px]:w-20"
+                  style={{ animation: "np-champion-pop 2.4s ease-in-out infinite" }}
+                />
+              </div>
+            </motion.div>
+
+            <div className="min-w-0 space-y-5 max-[900px]:space-y-2">
+              <div className="space-y-2 max-[900px]:space-y-1">
+                <motion.p
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.55, delay: 0.18 }}
+                  className="inline-flex rounded-full border border-orange-300/30 bg-orange-500/10 px-4 py-1.5 font-np-head text-sm font-black uppercase tracking-[0.34em] text-orange-200 shadow-[0_0_30px_rgba(249,115,22,0.14)] max-[900px]:px-3 max-[900px]:py-1 max-[900px]:text-[10px]"
+                >
+                  Campeões do Non Stop
+                </motion.p>
+                <motion.h3
+                  initial={{ opacity: 0, y: 22, scale: 0.985 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.78, delay: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                  className="max-w-[980px] break-words text-6xl font-black leading-[0.95] text-white [text-wrap:balance] max-[1400px]:text-5xl max-[1200px]:text-4xl max-[900px]:text-3xl"
+                  style={{ animation: "np-title-breathe 3.4s ease-in-out infinite" }}
+                >
+                  {champion ? normalizeTeamName(champion.name) : "Campeões por definir"}
+                </motion.h3>
+                <p className="hidden">
+                  {playedResults.length} jogos disputados · {stats.length} duplas
+                </p>
+                <p className="hidden">
+                  {playedResults.length} jogos disputados · {stats.length} duplas
+                </p>
+              </div>
+
+              {champion ? (
+                <div className="grid grid-cols-3 gap-2 max-[900px]:gap-1.5">
+                  {[
+                    { label: "Pontos", value: formatPoints(champion.points) },
+                    { label: "JG", value: champion.gamesWon },
+                    {
+                      label: "Dif.",
+                      value: `${champion.gamesWon - champion.gamesLost > 0 ? "+" : ""}${champion.gamesWon - champion.gamesLost}`,
+                    },
+                  ].map((item, index) => (
+                    <motion.div
+                      key={`champion-stat-${item.label}`}
+                      initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{ duration: 0.52, delay: 0.44 + index * 0.08 }}
+                      className="relative overflow-hidden rounded-md border border-white/10 bg-white/[0.08] p-3 text-center shadow-lg max-[900px]:p-2"
+                    >
+                      <span
+                        className="pointer-events-none absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                        style={{
+                          animation: "np-stat-shimmer 4.2s ease-in-out infinite",
+                          animationDelay: `${index * 0.45}s`,
+                        }}
+                      />
+                      <p className="relative text-[10px] font-black uppercase tracking-widest text-orange-200">{item.label}</p>
+                      <p className="relative font-np-num text-4xl font-black max-[900px]:text-2xl">{item.value}</p>
+                    </motion.div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="grid grid-cols-2 gap-3 max-[900px]:gap-1.5">
+                {[runnerUp, thirdPlace].map((team: any, index) => (
+                  <motion.div
+                    key={`champion-side-place-${index}`}
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: 0.74 + index * 0.1 }}
+                    className="flex min-w-0 items-center gap-3 rounded-md border border-white/10 bg-white/[0.06] p-3 shadow-lg max-[900px]:gap-2 max-[900px]:p-2"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-orange-500/15 text-orange-200 max-[900px]:h-8 max-[900px]:w-8">
+                      <Medal className="h-5 w-5 max-[900px]:h-4 max-[900px]:w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-orange-200">
+                        {index === 0 ? "2.º lugar" : "3.º lugar"}
+                      </p>
+                      <p className="mt-1 truncate text-sm font-bold text-white max-[900px]:text-xs">
+                        {team ? normalizeTeamName(team.name) : "-"}
+                      </p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (closingPresentationSlide === 1) {
+      const resultLookup = new Map(
+        (results ?? []).map((result) => [`${result.round}-${result.court}`, result]),
+      );
+
+      return (
+        <div className="space-y-2">
+          <Card className="overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-xl">
+            <CardHeader className="bg-slate-900 px-2.5 py-1.5 text-white max-[900px]:py-0.5">
+              <CardTitle className="font-np-head text-center text-sm uppercase tracking-widest max-[900px]:text-[10px]">
+                Classificação Geral
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader className="font-np-head bg-orange-600 text-white">
+                  <TableRow className="h-5 hover:bg-orange-600">
+                    <TableHead className="h-5 min-w-[200px] px-1.5 py-0 text-[9px] font-bold uppercase leading-none text-white">Duplas</TableHead>
+                    {Array.from({ length: displayNumRounds }).map((_, i) => (
+                      <TableHead key={`closing-simple-round-${i}`} className="h-5 min-w-[56px] border-l border-orange-500 py-0 text-center text-[9px] font-bold leading-none text-white">
+                        Ronda {i + 1}
+                      </TableHead>
+                    ))}
+                    <TableHead className="h-5 border-l border-orange-500 py-0 text-center text-[9px] font-bold leading-none text-white">JG</TableHead>
+                    <TableHead className="h-5 border-l border-orange-500 py-0 text-center text-[9px] font-bold leading-none text-white">JP</TableHead>
+                    <TableHead className="h-5 border-l border-orange-500 py-0 text-center text-[9px] font-bold leading-none text-white">DIF.</TableHead>
+                    <TableHead className="h-5 w-14 border-l border-orange-500 py-0 text-center text-[9px] font-bold leading-none text-white">Pontos</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="font-np-body">
+                  {stats.map((team: any, index: number) => (
+                    <TableRow key={`closing-simple-standing-${team.teamId}`} className={cn("h-5 hover:bg-slate-50", index === 0 && "bg-orange-50")}>
+                      <TableCell className="px-1.5 py-0 text-[9px] font-medium leading-tight">
+                        <div className="flex items-center gap-1.5">
+                          {index === 0 ? <Trophy className="h-3.5 w-3.5 shrink-0 text-orange-600" /> : null}
+                          <span className="break-words">{normalizeTeamName(team.name)}</span>
+                        </div>
+                      </TableCell>
+                      {team.sequence.map((char: string, i: number) => (
+                        <TableCell
+                          key={`closing-simple-standing-${team.teamId}-${i}`}
+                          className={cn(
+                            "font-np-head w-14 border-l py-0 text-center text-[9px] font-bold",
+                            char === "V" ? "bg-green-100 text-green-700" :
+                            char === "D" ? "bg-red-100 text-red-700" :
+                            char === "E" ? "bg-yellow-100 text-yellow-700" : "",
+                          )}
+                        >
+                          {char}
+                        </TableCell>
+                      ))}
+                      <TableCell className="font-np-num w-11 border-l py-0 text-center text-[9px]">{team.gamesWon}</TableCell>
+                      <TableCell className="font-np-num w-11 border-l py-0 text-center text-[9px]">{team.gamesLost}</TableCell>
+                      <TableCell className="font-np-num w-11 border-l py-0 text-center text-[9px]">{team.gamesWon - team.gamesLost}</TableCell>
+                      <TableCell className="font-np-num w-14 border-l bg-slate-50 py-0 text-center text-[9px] font-bold">{formatPoints(team.points)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 gap-1 lg:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: displayNumRounds }).map((_, roundIndex) => {
+              const roundNum = roundIndex + 1;
+              return (
+                <Card key={`closing-simple-results-round-${roundNum}`} className="overflow-hidden border-2 border-orange-600">
+                  <CardHeader className="bg-orange-600 py-0.5 text-center text-white">
+                    <CardTitle className="font-np-head text-[9px] uppercase tracking-widest">Ronda {roundNum}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader className="font-np-head bg-slate-100">
+                        <TableRow className="h-5 hover:bg-slate-100">
+                          <TableHead className="h-5 w-9 px-1 py-0 text-center text-[9px] font-bold leading-none">CAMPO</TableHead>
+                          <TableHead className="h-5 w-[34%] px-1 py-0 text-[9px] font-bold leading-none">EQUIPA A</TableHead>
+                          <TableHead className="h-5 w-10 px-1 py-0 text-center text-[9px] font-bold leading-none">RES</TableHead>
+                          <TableHead className="h-5 w-6 py-0 text-center text-[9px] font-normal leading-none text-muted-foreground">vs</TableHead>
+                          <TableHead className="h-5 w-10 px-1 py-0 text-center text-[9px] font-bold leading-none">RES</TableHead>
+                          <TableHead className="h-5 w-[34%] px-1 py-0 text-[9px] font-bold leading-none">EQUIPA B</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody className="font-np-body">
+                        {Array.from({ length: displayNumCourts }).map((__, courtIndex) => {
+                          const courtNum = courtIndex + 1;
+                          const matchResult = resultLookup.get(`${roundNum}-${courtNum}`);
+                          const teamA = teams?.find((team) => team.id === matchResult?.teamAId);
+                          const teamB = teams?.find((team) => team.id === matchResult?.teamBId);
+                          const scoreA = typeof matchResult?.scoreA === "number" ? matchResult.scoreA : null;
+                          const scoreB = typeof matchResult?.scoreB === "number" ? matchResult.scoreB : null;
+                          const hasPlayed = scoreA !== null && scoreB !== null && (scoreA > 0 || scoreB > 0);
+                          const isTeamAWinner = Boolean(hasPlayed && scoreA! > scoreB!);
+                          const isTeamBWinner = Boolean(hasPlayed && scoreB! > scoreA!);
+
+                          return (
+                            <TableRow key={`closing-simple-results-${roundNum}-${courtNum}`} className="h-5">
+                              <TableCell className="font-np-num border-r bg-slate-50 px-1 py-0.5 text-center text-[10px] font-bold">{courtNum}</TableCell>
+                              <TableCell className={cn("max-w-0 px-1 py-0.5 text-[9px] leading-tight", isTeamAWinner && "font-bold text-green-700")}>
+                                <span className="block truncate">{teamA ? getTeamOptionLabel(teamA) : "-"}</span>
+                              </TableCell>
+                              <TableCell className="font-np-num px-1 py-0.5 text-center text-[10px] font-bold">{scoreA ?? "-"}</TableCell>
+                              <TableCell className="font-np-head border-x bg-slate-50 py-0.5 text-center text-[9px] text-muted-foreground">vs</TableCell>
+                              <TableCell className="font-np-num px-1 py-0.5 text-center text-[10px] font-bold">{scoreB ?? "-"}</TableCell>
+                              <TableCell className={cn("max-w-0 px-1 py-0.5 text-[9px] leading-tight", isTeamBWinner && "font-bold text-green-700")}>
+                                <span className="block truncate">{teamB ? getTeamOptionLabel(teamB) : "-"}</span>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    const rankingPodium = projectedRankingTop.slice(0, 3);
+    const remainingRanking = projectedRankingTop.slice(3);
+
+    return (
+      <div className="space-y-3">
+        <div className="overflow-hidden rounded-md border border-white/15 bg-white text-slate-950 shadow-2xl">
+          <div className="flex items-center justify-between gap-3 bg-slate-950 px-5 py-3 text-white">
+            <div>
+              <p className="text-sm font-black uppercase tracking-[0.28em] text-orange-300">Ranking</p>
+              <h3 className="text-2xl font-black">
+                {presentationFinalizedEventId ? "Ranking atualizado" : "Ranking projetado"}
+              </h3>
+            </div>
+            <p className="max-w-sm text-right text-sm text-slate-300">
+              {presentationFinalizedEventId
+                ? "Pontos oficiais ja atualizados apos finalizar o Non Stop."
+                : "Inclui os pontos deste Non Stop. Fica oficial apos finalizar e atualizar pontos."}
+            </p>
+          </div>
+          {rankingPreviewQuery.isLoading ? (
+            <div className="p-8 text-center text-muted-foreground">A carregar ranking...</div>
+          ) : projectedRankingTop.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground">Ainda nao ha jogadores com pontos nesta categoria.</div>
+          ) : (
+            <div className="space-y-4 p-4">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                {rankingPodium.map((player) => (
+                  <div
+                    key={`closing-simple-ranking-podium-${player.playerId}`}
+                    className={cn(
+                      "rounded-md border p-4 shadow-sm",
+                      player.position === 1
+                        ? "border-orange-300 bg-orange-600 text-white"
+                        : "border-slate-200 bg-slate-50 text-slate-950",
+                    )}
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <span className={cn(
+                        "font-np-num text-4xl font-black",
+                        player.position === 1 ? "text-white" : "text-orange-600",
+                      )}>
+                        {player.position}
+                      </span>
+                      {player.position === 1 ? (
+                        <Trophy className="h-9 w-9 text-white" />
+                      ) : (
+                        <Medal className="h-8 w-8 text-orange-600" />
+                      )}
+                    </div>
+                    <p className="break-words text-xl font-black leading-tight">{player.name}</p>
+                    <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                      <div className={cn("rounded-md p-2", player.position === 1 ? "bg-white/15" : "bg-white")}>
+                        <p className="text-[10px] font-black uppercase tracking-widest opacity-70">Part.</p>
+                        <p className="font-np-num text-xl font-black">{player.participationCount}</p>
+                      </div>
+                      <div className={cn("rounded-md p-2", player.position === 1 ? "bg-white/15" : "bg-white")}>
+                        <p className="text-[10px] font-black uppercase tracking-widest opacity-70">Vit.</p>
+                        <p className="font-np-num text-xl font-black">{player.roundWins}</p>
+                      </div>
+                      <div className={cn("rounded-md p-2", player.position === 1 ? "bg-white/15" : "bg-white")}>
+                        <p className="text-[10px] font-black uppercase tracking-widest opacity-70">Pontos</p>
+                        <p className="font-np-num text-xl font-black">{formatPoints(player.totalPoints)}</p>
+                      </div>
+                    </div>
+                    {player.eventPoints > 0 ? (
+                      <p className={cn("mt-3 text-xs font-bold", player.position === 1 ? "text-orange-100" : "text-orange-600")}>
+                        +{formatPoints(player.eventPoints)} neste Non Stop
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+
+              <div className="overflow-hidden rounded-md border border-slate-200">
+                <div className="bg-slate-100 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-slate-600">
+                  Restante classificação
+                </div>
+                {remainingRanking.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-muted-foreground">Sem mais jogadores para apresentar.</div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-orange-600 hover:bg-orange-600">
+                        <TableHead className="w-16 text-white">#</TableHead>
+                        <TableHead className="text-white">Jogador</TableHead>
+                        <TableHead className="text-center text-white">Part.</TableHead>
+                        <TableHead className="text-center text-white">Vit.</TableHead>
+                        <TableHead className="text-right text-white">Pontos</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {remainingRanking.map((player) => (
+                        <TableRow key={`closing-simple-ranking-${player.playerId}`}>
+                          <TableCell className="font-np-num text-lg font-black">{player.position}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="text-base font-bold">{player.name}</span>
+                              {player.eventPoints > 0 ? (
+                                <span className="text-xs font-semibold text-orange-600">+{formatPoints(player.eventPoints)} neste Non Stop</span>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center font-semibold">{player.participationCount}</TableCell>
+                          <TableCell className="text-center font-semibold">{player.roundWins}</TableCell>
+                          <TableCell className="font-np-num text-right text-lg font-black text-orange-600">{formatPoints(player.totalPoints)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div
       ref={presentationContainerRef}
       style={
-        isPresentationMode && isDesktopPresentationViewport
+        isPresentationMode && isDesktopPresentationViewport && !isClosingPresentationActive
           ? ({ zoom: 1.25 } as any)
           : undefined
       }
@@ -2489,14 +3620,16 @@ export default function Nonstop() {
             <AlertDialogTrigger asChild>
               <Button className="h-9 gap-2 bg-orange-600 text-white hover:bg-orange-500 px-3 text-[11px]" disabled={readOnlyMode}>
                 <Square className="w-4 h-4" />
-                <span className="hidden sm:inline">Finalizar e iniciar novo</span>
-                <span className="sm:hidden">Finalizar</span>
+                <span className="hidden sm:inline">Finalizar e atualizar pontos</span>
+                <span className="sm:hidden">Atualizar pontos</span>
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Finalizar evento atual?</AlertDialogTitle>
-                <AlertDialogDescription>O evento atual será arquivado e um novo Non Stop vazio será criado.</AlertDialogDescription>
+                <AlertDialogTitle>Finalizar e atualizar pontos?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  O evento atual será arquivado e os pontos serão adicionados ao ranking desta categoria.
+                </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
@@ -2511,13 +3644,13 @@ export default function Nonstop() {
                         disabled={finalizeAndStartMutation.isPending}
                         className="bg-orange-600 text-white hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-70"
                       >
-                        {finalizeAndStartMutation.isPending ? "A finalizar..." : "Confirmar"}
+                        {finalizeAndStartMutation.isPending ? "A atualizar..." : "Confirmar"}
                       </AlertDialogAction>
                     </span>
                   </TooltipTrigger>
                   {finalizeAndStartMutation.isPending ? (
                     <TooltipContent>
-                      Indisponivel: o evento ja esta a ser finalizado e os pontos a ser atribuidos.
+                      Indisponível: o evento já está a ser finalizado e os pontos a ser atribuídos.
                     </TooltipContent>
                   ) : null}
                 </Tooltip>
@@ -2602,6 +3735,8 @@ export default function Nonstop() {
                 players={availablePlayers}
                 teams={teams || []}
                 isSubmitting={createTeamMutation.isPending || updateEventMetadataMutation.isPending}
+                isCreatingPlayer={createPlayerFromTeamMutation.isPending}
+                onCreatePlayer={(data) => createPlayerFromTeamMutation.mutateAsync(data)}
                 onSubmit={async (data) => {
                   if (hasEventMetadataChanges) {
                     try {
@@ -2702,7 +3837,73 @@ export default function Nonstop() {
         </div>
       </div>
 
-      {showHistoryEmptyState ? (
+      {isPresentationMode && isClosingPresentationActive ? (
+        <div className="relative min-h-[calc(100vh-58px)] overflow-hidden rounded-md bg-slate-950 p-3 text-white shadow-2xl max-[900px]:min-h-[calc(100vh-42px)] max-[900px]:p-2">
+          {false ? (
+          <div className="mb-2 flex flex-col gap-2 border-b border-white/10 pb-2 lg:flex-row lg:items-center lg:justify-between max-[900px]:mb-1 max-[900px]:pb-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              <div className="flex items-center gap-2">
+                <Trophy className="h-6 w-6 shrink-0 text-orange-400 max-[900px]:h-5 max-[900px]:w-5" />
+                <p className="text-[11px] font-black uppercase tracking-[0.32em] text-orange-300 max-[900px]:text-[9px]">Final do Non Stop</p>
+              </div>
+              <p className="text-sm font-medium text-slate-300 max-[900px]:text-xs">
+                {finalEventDateLabel} · {playedResults.length} jogos disputados · {stats.length} duplas
+              </p>
+              <p className="hidden">
+                {finalEventDateLabel} · {playedResults.length} jogos disputados · {stats.length} duplas
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {CLOSING_PRESENTATION_TABS.map((label, index) => (
+                <Button
+                  key={`closing-slide-button-${index}`}
+                  type="button"
+                  size="sm"
+                  variant={closingPresentationSlide === index ? "default" : "outline"}
+                  className={cn(
+                    "h-8 border-white/30 px-3 text-[10px]",
+                    closingPresentationSlide === index
+                      ? "bg-orange-600 text-white hover:bg-orange-500"
+                      : "bg-white/5 text-white hover:bg-white/15",
+                  )}
+                  onClick={() => setClosingPresentationSlide(index)}
+                >
+                  {label}
+                </Button>
+              ))}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 border-white/30 bg-white/5 px-3 text-[10px] text-white hover:bg-white/15"
+                onClick={() => {
+                  setDismissedClosingEventId(presentationDisplayEvent?.id ?? editableEvent?.id ?? null);
+                  setPresentationFinalizedEventId(null);
+                  setIsClosingPresentationActive(false);
+                  setClosingPresentationSlide(0);
+                }}
+              >
+                <ListOrdered className="mr-1 h-3.5 w-3.5" />
+                Ver grelha
+              </Button>
+            </div>
+          </div>
+          ) : null}
+
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={`closing-presentation-slide-${closingPresentationSlide}`}
+              initial={{ opacity: 0, y: 22, scale: 0.985, filter: "blur(6px)" }}
+              animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -18, scale: 0.99, filter: "blur(4px)" }}
+              transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
+              className="min-h-[calc(100vh-84px)] will-change-transform max-[900px]:min-h-[calc(100vh-50px)]"
+            >
+              {renderSimpleClosingPresentationView()}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      ) : showHistoryEmptyState ? (
         <Card className="border-2 border-dashed border-slate-300 bg-white/75 shadow-sm backdrop-blur">
           <CardContent className="flex min-h-[260px] flex-col items-center justify-center gap-3 px-6 py-12 text-center">
             <History className="h-10 w-10 text-orange-600" />
@@ -2926,6 +4127,8 @@ export default function Nonstop() {
               editingTeamId={editingTeam.id}
               defaultValues={editingTeam}
               submitLabel="Guardar alterações"
+              isCreatingPlayer={createPlayerFromTeamMutation.isPending}
+              onCreatePlayer={(data) => createPlayerFromTeamMutation.mutateAsync(data)}
               onSubmit={(data) => updateTeamMutation.mutate({ id: editingTeam.id, data })}
             />
           )}
@@ -2937,20 +4140,24 @@ export default function Nonstop() {
 
 function TeamForm({
   onSubmit,
+  onCreatePlayer,
   players,
   teams,
   editingTeamId,
   defaultValues,
   submitLabel = "Adicionar",
   isSubmitting = false,
+  isCreatingPlayer = false,
 }: {
   onSubmit: (data: any) => void;
+  onCreatePlayer?: (data: any) => Promise<Player>;
   players: Player[];
   teams: Team[];
   editingTeamId?: number;
   defaultValues?: Partial<Team>;
   submitLabel?: string;
   isSubmitting?: boolean;
+  isCreatingPlayer?: boolean;
 }) {
   const playersById = useMemo(
     () => new Map(players.map((player) => [player.id, player])),
@@ -2971,6 +4178,9 @@ function TeamForm({
   const [playerBSearch, setPlayerBSearch] = useState("");
   const [isPlayerASelectOpen, setIsPlayerASelectOpen] = useState(false);
   const [isPlayerBSelectOpen, setIsPlayerBSelectOpen] = useState(false);
+  const [isCreatePlayerOpen, setIsCreatePlayerOpen] = useState(false);
+  const [createPlayerTarget, setCreatePlayerTarget] = useState<"A" | "B" | null>(null);
+  const [createPlayerInitialName, setCreatePlayerInitialName] = useState("");
   const occupiedPlayerIds = useMemo(() => {
     const ids = new Set<number>();
     for (const team of teams) {
@@ -3003,6 +4213,30 @@ function TeamForm({
       player.name.toLocaleLowerCase().includes(searchValue),
     );
   }, [playerBSearch, sortedPlayers, selectedPlayerBId]);
+  const hasExactPlayerAName = useMemo(() => {
+    const searchValue = playerASearch.trim();
+    if (!searchValue) return true;
+    return sortedPlayers.some((player) =>
+      player.name.localeCompare(searchValue, "pt-PT", { sensitivity: "base" }) === 0,
+    );
+  }, [playerASearch, sortedPlayers]);
+  const hasExactPlayerBName = useMemo(() => {
+    const searchValue = playerBSearch.trim();
+    if (!searchValue) return true;
+    return sortedPlayers.some((player) =>
+      player.name.localeCompare(searchValue, "pt-PT", { sensitivity: "base" }) === 0,
+    );
+  }, [playerBSearch, sortedPlayers]);
+  const createPlayerDefaults = useMemo<Partial<Player>>(
+    () => ({
+      name: createPlayerInitialName,
+      phone: "",
+      level: "placeholder",
+      notes: "",
+      profileTags: "[]",
+    }),
+    [createPlayerInitialName],
+  );
 
   const applyAutoName = () => {
     const nameA = typeof selectedPlayerAId === "number" ? playersById.get(selectedPlayerAId)?.name : null;
@@ -3011,9 +4245,85 @@ function TeamForm({
     form.setValue("name", normalizeTeamName(`${nameA} / ${nameB}`), { shouldDirty: true });
   };
 
+  const openCreatePlayerDialog = (target: "A" | "B", suggestedName: string) => {
+    setCreatePlayerTarget(target);
+    setCreatePlayerInitialName(suggestedName.trim());
+    setIsPlayerASelectOpen(false);
+    setIsPlayerBSelectOpen(false);
+    setIsCreatePlayerOpen(true);
+  };
+
+  const handleCreatePlayerOpenChange = (open: boolean) => {
+    if (!open && isCreatingPlayer) return;
+    setIsCreatePlayerOpen(open);
+    if (!open) {
+      setCreatePlayerTarget(null);
+      setCreatePlayerInitialName("");
+    }
+  };
+
+  const handleCreatePlayerSubmit = async (data: any) => {
+    if (!onCreatePlayer || !createPlayerTarget) return;
+
+    const target = createPlayerTarget;
+    try {
+      const player = await onCreatePlayer(data);
+      const otherPlayerId = target === "A" ? selectedPlayerBId : selectedPlayerAId;
+      const otherPlayerName = typeof otherPlayerId === "number" ? playersById.get(otherPlayerId)?.name : null;
+
+      if (target === "A") {
+        form.setValue("playerAId", player.id, { shouldDirty: true, shouldValidate: true });
+        setPlayerASearch("");
+      } else {
+        form.setValue("playerBId", player.id, { shouldDirty: true, shouldValidate: true });
+        setPlayerBSearch("");
+      }
+
+      if (otherPlayerName) {
+        const nextTeamName = target === "A"
+          ? `${player.name} / ${otherPlayerName}`
+          : `${otherPlayerName} / ${player.name}`;
+        form.setValue("name", normalizeTeamName(nextTeamName), { shouldDirty: true, shouldValidate: true });
+      }
+
+      setIsCreatePlayerOpen(false);
+      setCreatePlayerTarget(null);
+      setCreatePlayerInitialName("");
+    } catch {
+      // The mutation toast already explains the failure.
+    }
+  };
+
+  const renderCreatePlayerButton = (
+    target: "A" | "B",
+    suggestedName: string,
+    hasExactMatch: boolean,
+  ) => {
+    const cleanName = suggestedName.trim();
+    if (!onCreatePlayer || !cleanName || hasExactMatch) return null;
+
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="mt-2 w-full gap-2"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.preventDefault();
+          openCreatePlayerDialog(target, cleanName);
+        }}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Criar jogador "{cleanName}"
+      </Button>
+    );
+  };
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+    <>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormField
             control={form.control}
@@ -3061,6 +4371,9 @@ function TeamForm({
                         </SelectItem>
                       ))
                     )}
+                    <div className="px-2 pb-2">
+                      {renderCreatePlayerButton("A", playerASearch, hasExactPlayerAName)}
+                    </div>
                   </SelectContent>
                 </Select>
                 <FormMessage />
@@ -3114,6 +4427,9 @@ function TeamForm({
                         </SelectItem>
                       ))
                     )}
+                    <div className="px-2 pb-2">
+                      {renderCreatePlayerButton("B", playerBSearch, hasExactPlayerBName)}
+                    </div>
                   </SelectContent>
                 </Select>
                 <FormMessage />
@@ -3148,8 +4464,24 @@ function TeamForm({
             </FormItem>
           )}
         />
-        <Button type="submit" className="w-full" disabled={isSubmitting}>{submitLabel}</Button>
-      </form>
-    </Form>
+          <Button type="submit" className="w-full" disabled={isSubmitting}>{submitLabel}</Button>
+        </form>
+      </Form>
+
+      <Dialog open={isCreatePlayerOpen} onOpenChange={handleCreatePlayerOpenChange}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Criar jogador</DialogTitle>
+          </DialogHeader>
+          <PlayerForm
+            key={`${createPlayerTarget ?? "new"}-${createPlayerInitialName}`}
+            defaultValues={createPlayerDefaults}
+            isSubmitting={isCreatingPlayer}
+            submitLabel="Criar jogador"
+            onSubmit={handleCreatePlayerSubmit}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

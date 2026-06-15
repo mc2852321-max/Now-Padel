@@ -27,6 +27,9 @@ import type {
 } from "./storage.js";
 
 const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
+const RANKING_ALL_CATEGORIES_TOKEN = "__all__";
+const RANKING_PARTICIPATION_POINTS = 2;
+const RANKING_MAX_WIN_POINTS_PER_EVENT = 15;
 
 type BootstrapAuthUserLike = {
   email: string;
@@ -34,8 +37,19 @@ type BootstrapAuthUserLike = {
   password: string;
 };
 
-function getLisbonYear(): number {
-  return Number(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Lisbon", year: "numeric" }).format(new Date()));
+function getLisbonYear(dateLike?: Date | string | null): number {
+  const value = dateLike ? new Date(dateLike) : new Date();
+  const safeValue = Number.isNaN(value.getTime()) ? new Date() : value;
+  return Number(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Lisbon", year: "numeric" }).format(safeValue));
+}
+
+function normalizeRankingPoints(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function resolveRoundWinPoints(nonstopRounds?: number | null): number {
+  const rounds = Number.isFinite(nonstopRounds) ? Math.max(1, Number(nonstopRounds)) : 0;
+  return rounds > 0 ? RANKING_MAX_WIN_POINTS_PER_EVENT / rounds : 3;
 }
 
 function parseBootstrapUsers(): BootstrapAuthUserLike[] {
@@ -64,7 +78,9 @@ export class LocalStorage implements IStorage {
   private nextTeamId = 1;
   private nextResultId = 1;
   private nextEventId = 2;
+  private nextTimerId = 2;
   private nextAuthorizedUserId = 1;
+  private nextRankingEntryId = 1;
 
   private players: Player[] = [
     { id: 1, name: "Joao Silva", phone: "912345678", level: "M5", notes: "Excelente backhand", profileTags: "[]" },
@@ -75,6 +91,9 @@ export class LocalStorage implements IStorage {
 
   private teams: Team[] = [];
   private results: NonstopResult[] = [];
+  private completedEvents: NonstopEvent[] = [];
+  private completedTimers: NonstopTimer[] = [];
+  private rankingEntries: RankingEntry[] = [];
   private authorizedUsers: AuthorizedUser[] = [];
   private event: NonstopEvent = {
     id: 1,
@@ -133,6 +152,107 @@ export class LocalStorage implements IStorage {
         password: bcrypt.hashSync(user.password, 10),
         addedAt: new Date(),
       });
+    }
+  }
+
+  private normalizeNonstopCategory(value: unknown, fallback = DEFAULT_NONSTOP_CATEGORY): string {
+    const cleaned = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+    if (!cleaned) return fallback;
+    return cleaned.length <= 60 ? cleaned : cleaned.slice(0, 60).trim() || fallback;
+  }
+
+  private parseNonstopCategories(): string[] {
+    try {
+      const parsed = JSON.parse(this.settings.nonstopCategories);
+      if (Array.isArray(parsed)) {
+        const categories = parsed
+          .map((value) => this.normalizeNonstopCategory(value, ""))
+          .filter(Boolean);
+        if (categories.length > 0) return Array.from(new Set(categories));
+      }
+    } catch {
+      // keep local mode forgiving when settings are edited by hand
+    }
+    return [DEFAULT_NONSTOP_CATEGORY];
+  }
+
+  private categoryKey(category: string): string {
+    return encodeURIComponent(this.normalizeNonstopCategory(category));
+  }
+
+  private createRankingEntry(entry: Omit<RankingEntry, "id" | "createdAt">): boolean {
+    if (this.rankingEntries.some((existing) => existing.reasonKey === entry.reasonKey)) {
+      return false;
+    }
+
+    this.rankingEntries.push({
+      ...entry,
+      id: this.nextRankingEntryId++,
+      createdAt: new Date(),
+    });
+    return true;
+  }
+
+  private awardRankingForCurrentEvent(
+    eventId: number,
+    seasonYear: number,
+    category: string,
+    eventTeams: Team[],
+    eventResults: NonstopResult[],
+  ): void {
+    const normalizedCategory = this.normalizeNonstopCategory(category);
+    const categoryKey = this.categoryKey(normalizedCategory);
+    const teamPlayers = new Map<number, number[]>();
+    const participatingPlayers = new Set<number>();
+
+    for (const team of eventTeams) {
+      const playerIds = [team.playerAId, team.playerBId]
+        .filter((id): id is number => typeof id === "number" && id > 0);
+      const uniquePlayerIds = Array.from(new Set(playerIds));
+      teamPlayers.set(team.id, uniquePlayerIds);
+      for (const playerId of uniquePlayerIds) {
+        participatingPlayers.add(playerId);
+      }
+    }
+
+    for (const playerId of Array.from(participatingPlayers)) {
+      this.createRankingEntry({
+        playerId,
+        seasonYear,
+        category: normalizedCategory,
+        eventId,
+        round: null,
+        points: RANKING_PARTICIPATION_POINTS,
+        reason: "participation",
+        reasonKey: `nonstop:${eventId}:cat:${categoryKey}:participation:player:${playerId}`,
+        note: "Participacao no Non Stop",
+      });
+    }
+
+    const roundWinPoints = resolveRoundWinPoints(this.settings.nonstopRounds);
+
+    for (const result of eventResults) {
+      const hasPlayed = result.scoreA > 0 || result.scoreB > 0;
+      if (!hasPlayed) continue;
+
+      let winnerTeamId: number | null = null;
+      if (result.scoreA > result.scoreB) winnerTeamId = result.teamAId;
+      if (result.scoreB > result.scoreA) winnerTeamId = result.teamBId;
+      if (!winnerTeamId) continue;
+
+      for (const playerId of teamPlayers.get(winnerTeamId) ?? []) {
+        this.createRankingEntry({
+          playerId,
+          seasonYear,
+          category: normalizedCategory,
+          eventId,
+          round: result.round,
+          points: roundWinPoints,
+          reason: "round_win",
+          reasonKey: `nonstop:${eventId}:cat:${categoryKey}:round:${result.round}:court:${result.court}:win:player:${playerId}`,
+          note: `Vitoria na ronda ${result.round}`,
+        });
+      }
     }
   }
 
@@ -206,48 +326,128 @@ export class LocalStorage implements IStorage {
   }
 
   async listNonstopEvents(): Promise<NonstopEventSummary[]> {
-    return [this.event];
+    return [this.event, ...this.completedEvents]
+      .sort((a, b) => {
+        const aTime = new Date(a.startedAt ?? a.createdAt).getTime();
+        const bTime = new Date(b.startedAt ?? b.createdAt).getTime();
+        return bTime - aTime;
+      });
   }
 
   async getNonstopEventById(id: number): Promise<NonstopEvent | null> {
-    return id === this.event.id ? this.event : null;
+    if (id === this.event.id) return this.event;
+    return this.completedEvents.find((event) => event.id === id) ?? null;
   }
 
   async updateNonstopEventMetadata(id: number, update: { label?: string | null; startedAt?: Date | null; category?: string | null }): Promise<NonstopEvent | null> {
-    if (id !== this.event.id) return null;
-    this.event = {
-      ...this.event,
-      label: update.label ?? this.event.label,
-      startedAt: update.startedAt ?? this.event.startedAt,
-      category: update.category?.trim() || this.event.category || DEFAULT_NONSTOP_CATEGORY,
-    };
-    return this.event;
+    const nextValues = (event: NonstopEvent): NonstopEvent => ({
+      ...event,
+      label: update.label ?? event.label,
+      startedAt: update.startedAt ?? event.startedAt,
+      category: update.category?.trim() || event.category || DEFAULT_NONSTOP_CATEGORY,
+    });
+
+    if (id === this.event.id) {
+      this.event = nextValues(this.event);
+      return this.event;
+    }
+
+    const index = this.completedEvents.findIndex((event) => event.id === id);
+    if (index === -1) return null;
+    this.completedEvents[index] = nextValues(this.completedEvents[index]);
+    if (update.category) {
+      const category = this.normalizeNonstopCategory(update.category);
+      this.rankingEntries = this.rankingEntries.map((entry) =>
+        entry.eventId === id ? { ...entry, category } : entry
+      );
+    }
+    return this.completedEvents[index];
   }
 
   async getNonstopEventDetails(id: number): Promise<NonstopEventDetails | null> {
-    if (id !== this.event.id) return null;
+    const event = await this.getNonstopEventById(id);
+    if (!event) return null;
+    let snapshot: any | null = null;
+    if (event.snapshot) {
+      try {
+        snapshot = JSON.parse(event.snapshot);
+      } catch {
+        snapshot = null;
+      }
+    }
     return {
-      event: this.event,
-      teams: this.teams,
-      results: this.results,
-      timer: this.timer,
-      snapshot: null,
+      event,
+      teams: this.teams.filter((team) => team.eventId === id),
+      results: this.results.filter((result) => result.eventId === id),
+      timer: await this.getNonstopTimer(id),
+      snapshot,
     };
   }
 
   async deleteNonstopEvent(id: number): Promise<{ deletedEventId: number; deletedRankingEntries: number }> {
-    if (id !== this.event.id) {
-      throw new Error("EVENT_NOT_FOUND");
-    }
-    if (this.event.status === "active") {
+    if (id === this.event.id) {
       throw new Error("ACTIVE_EVENT_DELETE_NOT_ALLOWED");
     }
-    throw new Error("EVENT_NOT_FOUND");
+    const beforeEvents = this.completedEvents.length;
+    this.completedEvents = this.completedEvents.filter((event) => event.id !== id);
+    if (this.completedEvents.length === beforeEvents) {
+      throw new Error("EVENT_NOT_FOUND");
+    }
+    this.teams = this.teams.filter((team) => team.eventId !== id);
+    this.results = this.results.filter((result) => result.eventId !== id);
+    this.completedTimers = this.completedTimers.filter((timer) => timer.eventId !== id);
+    const beforeRankingEntries = this.rankingEntries.length;
+    this.rankingEntries = this.rankingEntries.filter((entry) => entry.eventId !== id);
+    return {
+      deletedEventId: id,
+      deletedRankingEntries: beforeRankingEntries - this.rankingEntries.length,
+    };
   }
 
   async finalizeAndStartNonstop(opts?: { label?: string; userEmail?: string | null }): Promise<{ completedEventId: number; newEvent: NonstopEvent }> {
     const completedEventId = this.event.id;
-    const category = this.event.category || DEFAULT_NONSTOP_CATEGORY;
+    const category = this.normalizeNonstopCategory(this.event.category);
+    const eventTeams = this.teams.filter((team) => team.eventId === completedEventId);
+    const eventResults = this.results.filter((result) => result.eventId === completedEventId);
+    this.awardRankingForCurrentEvent(
+      completedEventId,
+      getLisbonYear(this.event.startedAt ?? this.event.createdAt),
+      category,
+      eventTeams,
+      eventResults,
+    );
+    const completedAt = new Date();
+    const completedEvent: NonstopEvent = {
+      ...this.event,
+      status: "completed",
+      label: opts?.label ?? this.event.label,
+      category,
+      completedAt,
+      finalizedBy: opts?.userEmail ?? null,
+      snapshot: JSON.stringify({
+        finalizedAt: completedAt.toISOString(),
+        category,
+        teams: eventTeams,
+        results: eventResults,
+        timer: this.timer,
+        settings: {
+          tieBreaker: this.settings.tieBreaker,
+          nonstopRounds: this.settings.nonstopRounds,
+          nonstopCourts: this.settings.nonstopCourts,
+          gameTime: this.settings.gameTime,
+          warmupTime: this.settings.warmupTime,
+          restTime: this.settings.restTime,
+        },
+      }),
+    };
+    this.completedEvents = [
+      completedEvent,
+      ...this.completedEvents.filter((event) => event.id !== completedEventId),
+    ];
+    this.completedTimers = [
+      { ...this.timer, eventId: completedEventId, updatedAt: new Date() },
+      ...this.completedTimers.filter((timer) => timer.eventId !== completedEventId),
+    ];
     this.event = {
       id: this.nextEventId++,
       status: "active",
@@ -260,9 +460,7 @@ export class LocalStorage implements IStorage {
       createdBy: opts?.userEmail ?? "local",
       snapshot: null,
     };
-    this.timer = { ...this.timer, eventId: this.event.id, timerState: "idle", isActive: 0, round: 1, timeLeft: 0, phaseEndsAt: null, updatedAt: new Date() };
-    this.teams = [];
-    this.results = [];
+    this.timer = { id: this.nextTimerId++, eventId: this.event.id, timerState: "idle", isActive: 0, round: 1, timeLeft: 0, phaseEndsAt: null, updatedAt: new Date() };
     return { completedEventId, newEvent: this.event };
   }
 
@@ -271,7 +469,8 @@ export class LocalStorage implements IStorage {
   }
 
   async getTeams(eventId?: number): Promise<Team[]> {
-    return this.teams.filter((team) => eventId == null || team.eventId === eventId);
+    const targetEventId = eventId ?? this.event.id;
+    return this.teams.filter((team) => team.eventId === targetEventId);
   }
 
   async createTeam(team: InsertTeam): Promise<Team> {
@@ -298,7 +497,8 @@ export class LocalStorage implements IStorage {
   }
 
   async getResults(eventId?: number): Promise<NonstopResult[]> {
-    return this.results.filter((result) => eventId == null || result.eventId === eventId);
+    const targetEventId = eventId ?? this.event.id;
+    return this.results.filter((result) => result.eventId === targetEventId);
   }
 
   async createOrUpdateResult(result: InsertNonstopResult): Promise<NonstopResult> {
@@ -326,7 +526,7 @@ export class LocalStorage implements IStorage {
   }
 
   async clearResults(): Promise<void> {
-    this.results = [];
+    this.results = this.results.filter((result) => result.eventId !== this.event.id);
   }
 
   async getSettings(): Promise<Settings> {
@@ -338,7 +538,19 @@ export class LocalStorage implements IStorage {
     return this.settings;
   }
 
-  async getNonstopTimer(): Promise<NonstopTimer> {
+  async getNonstopTimer(eventId?: number): Promise<NonstopTimer> {
+    if (eventId != null && eventId !== this.event.id) {
+      return this.completedTimers.find((timer) => timer.eventId === eventId) ?? {
+        id: 0,
+        eventId,
+        timerState: "idle",
+        isActive: 0,
+        round: 1,
+        timeLeft: 0,
+        phaseEndsAt: null,
+        updatedAt: new Date(),
+      };
+    }
     return this.timer;
   }
 
@@ -352,35 +564,92 @@ export class LocalStorage implements IStorage {
   }
 
   async resetNonstop(): Promise<void> {
-    this.teams = [];
-    this.results = [];
+    this.teams = this.teams.filter((team) => team.eventId !== this.event.id);
+    this.results = this.results.filter((result) => result.eventId !== this.event.id);
     this.timer = { ...this.timer, timerState: "idle", isActive: 0, round: 1, timeLeft: 0, phaseEndsAt: null, updatedAt: new Date() };
   }
 
-  async getRankingLeaderboard(_seasonYear?: number, _category?: string): Promise<RankingLeaderboardRow[]> {
-    return [];
+  async getRankingLeaderboard(seasonYear?: number, category?: string): Promise<RankingLeaderboardRow[]> {
+    const targetSeason = Number.isInteger(seasonYear) ? seasonYear! : getLisbonYear();
+    const includeAllCategories = typeof category === "string" && category.trim().toLowerCase() === RANKING_ALL_CATEGORIES_TOKEN;
+    const categories = await this.getRankingCategories();
+    const requestedCategory = this.normalizeNonstopCategory(category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+    const targetCategory = categories.includes(requestedCategory)
+      ? requestedCategory
+      : (categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+
+    const entries = this.rankingEntries.filter((entry) =>
+      entry.seasonYear === targetSeason &&
+      (includeAllCategories || entry.category === targetCategory)
+    );
+
+    const totalsByPlayer = new Map<number, RankingLeaderboardRow>();
+    for (const player of this.players) {
+      totalsByPlayer.set(player.id, {
+        playerId: player.id,
+        name: player.name,
+        level: player.level,
+        totalPoints: 0,
+        importedPoints: 0,
+        participationCount: 0,
+        roundWins: 0,
+        lastEntryAt: null,
+      });
+    }
+
+    for (const entry of entries) {
+      const row = totalsByPlayer.get(entry.playerId);
+      if (!row) continue;
+
+      row.totalPoints = normalizeRankingPoints(row.totalPoints + entry.points);
+      if (entry.reason === "import") row.importedPoints = normalizeRankingPoints(row.importedPoints + entry.points);
+      if (entry.reason === "participation") row.participationCount += 1;
+      if (entry.reason === "round_win") row.roundWins += 1;
+      if (!row.lastEntryAt || entry.createdAt > row.lastEntryAt) {
+        row.lastEntryAt = entry.createdAt;
+      }
+    }
+
+    return Array.from(totalsByPlayer.values()).sort((a, b) => {
+      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+      return a.name.localeCompare(b.name, "pt-PT", { sensitivity: "base" });
+    });
   }
 
-  async getRankingEntries(_playerId?: number, _seasonYear?: number, _category?: string): Promise<RankingEntry[]> {
-    return [];
+  async getRankingEntries(playerId?: number, seasonYear?: number, category?: string): Promise<RankingEntry[]> {
+    const targetSeason = Number.isInteger(seasonYear) ? seasonYear! : getLisbonYear();
+    const includeAllCategories = typeof category === "string" && category.trim().toLowerCase() === RANKING_ALL_CATEGORIES_TOKEN;
+    const categories = await this.getRankingCategories();
+    const requestedCategory = this.normalizeNonstopCategory(category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+    const targetCategory = categories.includes(requestedCategory)
+      ? requestedCategory
+      : (categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+
+    return this.rankingEntries
+      .filter((entry) => entry.seasonYear === targetSeason)
+      .filter((entry) => includeAllCategories || entry.category === targetCategory)
+      .filter((entry) => !playerId || entry.playerId === playerId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id);
   }
 
   async getRankingSeasons(): Promise<number[]> {
-    return [getLisbonYear()];
+    const seasons = new Set<number>([getLisbonYear()]);
+    for (const entry of this.rankingEntries) {
+      seasons.add(entry.seasonYear);
+    }
+    return Array.from(seasons).sort((a, b) => b - a);
   }
 
   async getRankingCategories(): Promise<string[]> {
-    try {
-      const parsed = JSON.parse(this.settings.nonstopCategories);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed
-          .map((value) => (typeof value === "string" ? value.trim() : ""))
-          .filter(Boolean);
-      }
-    } catch {
-      // ignore invalid json in local mode
+    const configured = this.parseNonstopCategories();
+    const categorySet = new Set(configured);
+    for (const entry of this.rankingEntries) {
+      categorySet.add(this.normalizeNonstopCategory(entry.category));
     }
-    return [DEFAULT_NONSTOP_CATEGORY];
+    if (this.event.category) {
+      categorySet.add(this.normalizeNonstopCategory(this.event.category));
+    }
+    return Array.from(categorySet);
   }
 
   async getRankingHistory(opts?: { category?: string; limitSeasons?: number }): Promise<RankingSeasonHistoryRow[]> {
@@ -389,18 +658,83 @@ export class LocalStorage implements IStorage {
       ? Math.min(5, Math.max(1, Math.trunc(Number(opts?.limitSeasons))))
       : 2;
 
-    return seasons.slice(0, limitSeasons).map((season) => ({
-      season,
-      totalPlayers: 0,
-      totalPoints: 0,
-      importedPoints: 0,
-      lastEntryAt: null,
-      topPlayers: [],
-    }));
+    const includeAllCategories = typeof opts?.category === "string" && opts.category.trim().toLowerCase() === RANKING_ALL_CATEGORIES_TOKEN;
+    const categories = await this.getRankingCategories();
+    const requestedCategory = this.normalizeNonstopCategory(opts?.category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+    const targetCategory = includeAllCategories
+      ? RANKING_ALL_CATEGORIES_TOKEN
+      : categories.includes(requestedCategory)
+        ? requestedCategory
+        : (categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+
+    const history: RankingSeasonHistoryRow[] = [];
+    for (const season of seasons.slice(0, limitSeasons)) {
+      const leaderboard = await this.getRankingLeaderboard(season, targetCategory);
+      const rowsWithPoints = leaderboard.filter((row) =>
+        row.totalPoints !== 0 ||
+        row.importedPoints !== 0 ||
+        row.participationCount > 0 ||
+        row.roundWins > 0,
+      );
+      const lastEntryAt = rowsWithPoints.reduce<Date | null>(
+        (latest, row) => row.lastEntryAt && (!latest || row.lastEntryAt > latest) ? row.lastEntryAt : latest,
+        null,
+      );
+
+      history.push({
+        season,
+        totalPlayers: rowsWithPoints.length,
+        totalPoints: normalizeRankingPoints(rowsWithPoints.reduce((sum, row) => sum + row.totalPoints, 0)),
+        importedPoints: normalizeRankingPoints(rowsWithPoints.reduce((sum, row) => sum + row.importedPoints, 0)),
+        lastEntryAt,
+        topPlayers: rowsWithPoints.slice(0, 3).map((row, index) => ({
+          position: index + 1,
+          playerId: row.playerId,
+          name: row.name,
+          level: row.level,
+          totalPoints: row.totalPoints,
+        })),
+      });
+    }
+
+    return history;
   }
 
-  async importRankingBasePoints(_rows: RankingImportRow[], _opts?: { batchLabel?: string; seasonYear?: number; category?: string; userEmail?: string | null }): Promise<number> {
-    return 0;
+  async importRankingBasePoints(rows: RankingImportRow[], opts?: { batchLabel?: string; seasonYear?: number; category?: string; userEmail?: string | null }): Promise<number> {
+    const cleanRows = rows
+      .filter((row) => Number.isInteger(row.playerId) && row.playerId > 0)
+      .filter((row) => Number.isFinite(row.points))
+      .map((row) => ({ ...row, points: normalizeRankingPoints(row.points) }))
+      .filter((row) => row.points !== 0);
+    if (cleanRows.length === 0) return 0;
+
+    const seasonYear = Number.isInteger(opts?.seasonYear) ? opts!.seasonYear! : getLisbonYear();
+    const categories = await this.getRankingCategories();
+    const requestedCategory = this.normalizeNonstopCategory(opts?.category, categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+    const category = categories.includes(requestedCategory)
+      ? requestedCategory
+      : (categories[0] ?? DEFAULT_NONSTOP_CATEGORY);
+    const categoryKey = this.categoryKey(category);
+    const batchLabel = (opts?.batchLabel ?? "").trim() || new Date().toISOString();
+    const userEmail = (opts?.userEmail ?? "").trim();
+    let inserted = 0;
+
+    for (const row of cleanRows) {
+      const wasInserted = this.createRankingEntry({
+        playerId: row.playerId,
+        seasonYear,
+        category,
+        eventId: null,
+        round: null,
+        points: row.points,
+        reason: "import",
+        reasonKey: `import:${seasonYear}:cat:${categoryKey}:${batchLabel}:player:${row.playerId}`,
+        note: row.note || (userEmail ? `Importado por ${userEmail}` : "Importacao de pontuacao inicial"),
+      });
+      if (wasInserted) inserted += 1;
+    }
+
+    return inserted;
   }
 
   async getAuthorizedUsers(): Promise<AuthorizedUser[]> {

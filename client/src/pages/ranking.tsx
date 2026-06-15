@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { History, Info, Trophy, Upload } from "lucide-react";
+import { Download, History, Info, Trophy, Upload } from "lucide-react";
+import * as XLSX from "xlsx-js-style";
+import { type Settings } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -83,6 +85,27 @@ type RankingHistoryResponse = {
 };
 
 const ALL_CATEGORIES_VALUE = "__all__";
+const RANKING_EXPORT_PAGE_SIZE = 100;
+
+function sanitizeSheetName(value: string) {
+  const clean = value
+    .replace(/[\\/?*[\]:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return (clean || "Ranking").slice(0, 31);
+}
+
+function slugifyFilePart(value: string) {
+  const slug = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+
+  return (slug || "ranking").slice(0, 80);
+}
 
 const formatPoints = (value: number) => (
   Number.isInteger(value)
@@ -131,6 +154,7 @@ const formatRuleDetails = (rule: RankingRuleFormat) => {
 export default function Ranking() {
   const { toast } = useToast();
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [isExportingRanking, setIsExportingRanking] = useState(false);
   const [batchLabel, setBatchLabel] = useState("");
   const [playerSearch, setPlayerSearch] = useState("");
   const [importValues, setImportValues] = useState<Record<number, string>>({});
@@ -141,6 +165,12 @@ export default function Ranking() {
   const [pageSize, setPageSize] = useState(25);
   const lastPlayersErrorToastRef = useRef<{ message: string; at: number } | null>(null);
   const isGeneralCategorySelected = selectedCategory === ALL_CATEGORIES_VALUE;
+
+  const { data: settings } = useQuery<Settings>({
+    queryKey: ["/api/settings"],
+    refetchInterval: RANKING_POLL_MS,
+    refetchOnWindowFocus: true,
+  });
 
   const { data: ranking, isLoading: isRankingLoading } = useQuery<RankingResponse>({
     queryKey: ["/api/ranking", { season: selectedSeason ?? "current", category: selectedCategory ?? "current", showZeroPlayers, page, pageSize }],
@@ -300,6 +330,275 @@ export default function Ranking() {
     });
   };
 
+  const fetchRankingExportItems = async (
+    season: number,
+    category: string,
+    includeAllCategories: boolean,
+  ) => {
+    const firstParams = new URLSearchParams();
+    firstParams.set("season", String(season));
+    firstParams.set("onlyWithPoints", showZeroPlayers ? "0" : "1");
+    firstParams.set("page", "1");
+    firstParams.set("pageSize", String(RANKING_EXPORT_PAGE_SIZE));
+    if (includeAllCategories) {
+      firstParams.set("scope", "all");
+    } else {
+      firstParams.set("category", category);
+    }
+
+    const firstRes = await fetch(`/api/ranking?${firstParams.toString()}`, { credentials: "include" });
+    if (!firstRes.ok) throw new Error("Não foi possível preparar a exportação.");
+    const firstPage = await firstRes.json() as RankingResponse;
+    const pages = [firstPage];
+
+    for (let pageNumber = 2; pageNumber <= firstPage.totalPages; pageNumber += 1) {
+      const params = new URLSearchParams(firstParams);
+      params.set("page", String(pageNumber));
+      const res = await fetch(`/api/ranking?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Não foi possível carregar todos os dados do ranking.");
+      pages.push(await res.json() as RankingResponse);
+    }
+
+    return pages.flatMap((pageData) => pageData.items);
+  };
+
+  const handleExportRanking = async () => {
+    if (!ranking) return;
+
+    const season = selectedSeason ?? ranking.season;
+    const includeAllCategories = isGeneralCategorySelected || ranking.scope === "all";
+    const exportCategory = includeAllCategories
+      ? "Geral (todas as categorias)"
+      : (selectedCategory ?? ranking.category);
+    const clubName = settings?.clubName || "Now Padel & Fit";
+    const exportedAt = new Date();
+    const exportDate = exportedAt.toLocaleDateString("pt-PT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+    const exportDateTime = exportedAt.toLocaleString("pt-PT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    setIsExportingRanking(true);
+    try {
+      const exportItems = await fetchRankingExportItems(season, exportCategory, includeAllCategories);
+      const totalPlayers = exportItems.length;
+      const totalPoints = exportItems.reduce((sum, row) => sum + row.totalPoints, 0);
+      const importedPoints = exportItems.reduce((sum, row) => sum + row.importedPoints, 0);
+
+      const wb = XLSX.utils.book_new();
+      const ws: any = XLSX.utils.aoa_to_sheet([]);
+      const title = `Classificação - ${exportCategory}`;
+      const sheetName = sanitizeSheetName(includeAllCategories ? "Ranking Geral" : exportCategory);
+      const tableHeaders = ["Posição", "Jogador", "Participações", "Vitórias", "Pontos"];
+      const tableRows = exportItems.map((row) => [
+        row.position,
+        row.name,
+        row.participationCount,
+        row.roundWins,
+        row.totalPoints,
+      ]);
+
+      const border = {
+        top: { style: "thin", color: { rgb: "E2E8F0" } },
+        bottom: { style: "thin", color: { rgb: "E2E8F0" } },
+        left: { style: "thin", color: { rgb: "E2E8F0" } },
+        right: { style: "thin", color: { rgb: "E2E8F0" } },
+      };
+      const titleStyle = {
+        font: { bold: true, sz: 20, color: { rgb: "F97316" } },
+        fill: { fgColor: { rgb: "0F172A" } },
+        alignment: { horizontal: "center", vertical: "center" },
+      };
+      const subtitleStyle = {
+        font: { bold: true, sz: 12, color: { rgb: "FFFFFF" } },
+        fill: { fgColor: { rgb: "111827" } },
+        alignment: { horizontal: "center", vertical: "center" },
+      };
+      const metaLabelStyle = {
+        font: { bold: true, color: { rgb: "475569" } },
+        fill: { fgColor: { rgb: "F8FAFC" } },
+        alignment: { horizontal: "left", vertical: "center" },
+        border,
+      };
+      const metaValueStyle = {
+        font: { bold: true, color: { rgb: "0F172A" } },
+        fill: { fgColor: { rgb: "FFFFFF" } },
+        alignment: { horizontal: "left", vertical: "center" },
+        border,
+      };
+      const headerStyle = {
+        font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
+        fill: { fgColor: { rgb: "EA580C" } },
+        alignment: { horizontal: "center", vertical: "center" },
+        border,
+      };
+      const oddStyle = {
+        fill: { fgColor: { rgb: "FFF7ED" } },
+        alignment: { horizontal: "center", vertical: "center" },
+        border,
+      };
+      const evenStyle = {
+        fill: { fgColor: { rgb: "FFFFFF" } },
+        alignment: { horizontal: "center", vertical: "center" },
+        border,
+      };
+      const nameOddStyle = {
+        ...oddStyle,
+        font: { bold: true, color: { rgb: "111827" } },
+        alignment: { horizontal: "left", vertical: "center" },
+      };
+      const nameEvenStyle = {
+        ...evenStyle,
+        font: { bold: true, color: { rgb: "111827" } },
+        alignment: { horizontal: "left", vertical: "center" },
+      };
+      const podiumStyle = (fill: string) => ({
+        font: { bold: true, color: { rgb: "111827" } },
+        fill: { fgColor: { rgb: fill } },
+        alignment: { horizontal: "center", vertical: "center" },
+        border,
+      });
+      const podiumNameStyle = (fill: string) => ({
+        ...podiumStyle(fill),
+        alignment: { horizontal: "left", vertical: "center" },
+      });
+      const pointsStyle = {
+        font: { bold: true, sz: 12, color: { rgb: "EA580C" } },
+        fill: { fgColor: { rgb: "FFEDD5" } },
+        alignment: { horizontal: "right", vertical: "center" },
+        border,
+      };
+      const emptyStyle = {
+        font: { italic: true, color: { rgb: "64748B" } },
+        alignment: { horizontal: "center", vertical: "center" },
+        border,
+      };
+
+      XLSX.utils.sheet_add_aoa(ws, [[title]], { origin: "A1" });
+      XLSX.utils.sheet_add_aoa(ws, [[`${clubName} · Temporada ${season} · Exportado em ${exportDateTime}`]], { origin: "A2" });
+      XLSX.utils.sheet_add_aoa(ws, [
+        ["Ranking", exportCategory, "", "Temporada", season],
+        ["Atualizado em", exportDateTime, "", "Jogadores", totalPlayers],
+        ["Pontos totais", totalPoints, "", "Base importada", importedPoints],
+      ], { origin: "A4" });
+      XLSX.utils.sheet_add_aoa(ws, [tableHeaders], { origin: "A8" });
+
+      if (tableRows.length > 0) {
+        XLSX.utils.sheet_add_aoa(ws, tableRows, { origin: "A9" });
+      } else {
+        XLSX.utils.sheet_add_aoa(ws, [["Sem jogadores com pontuação neste ranking."]], { origin: "A9" });
+      }
+
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } },
+        ...(tableRows.length === 0 ? [{ s: { r: 8, c: 0 }, e: { r: 8, c: 4 } }] : []),
+      ];
+      ws["!cols"] = [
+        { wch: 10 },
+        { wch: 34 },
+        { wch: 16 },
+        { wch: 12 },
+        { wch: 14 },
+      ];
+      ws["!rows"] = [
+        { hpt: 32 },
+        { hpt: 22 },
+        { hpt: 8 },
+        { hpt: 22 },
+        { hpt: 22 },
+        { hpt: 22 },
+        { hpt: 8 },
+        { hpt: 24 },
+      ];
+
+      for (let columnIndex = 0; columnIndex < 5; columnIndex += 1) {
+        const titleAddr = XLSX.utils.encode_cell({ r: 0, c: columnIndex });
+        const subtitleAddr = XLSX.utils.encode_cell({ r: 1, c: columnIndex });
+        if (!ws[titleAddr]) ws[titleAddr] = { t: "s", v: "" };
+        if (!ws[subtitleAddr]) ws[subtitleAddr] = { t: "s", v: "" };
+        ws[titleAddr].s = titleStyle;
+        ws[subtitleAddr].s = subtitleStyle;
+
+        const headerAddr = XLSX.utils.encode_cell({ r: 7, c: columnIndex });
+        if (ws[headerAddr]) ws[headerAddr].s = headerStyle;
+      }
+
+      for (let rowIndex = 3; rowIndex <= 5; rowIndex += 1) {
+        for (let columnIndex = 0; columnIndex < 5; columnIndex += 1) {
+          const addr = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
+          if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+          ws[addr].s = columnIndex === 0 || columnIndex === 3 ? metaLabelStyle : metaValueStyle;
+        }
+      }
+
+      if (tableRows.length === 0) {
+        ws["A9"].s = emptyStyle;
+      } else {
+        exportItems.forEach((row, index) => {
+          const excelRowIndex = 8 + index;
+          const isOdd = index % 2 === 0;
+          const podiumFill = row.position === 1
+            ? "FACC15"
+            : row.position === 2
+              ? "CBD5E1"
+              : row.position === 3
+                ? "FDBA74"
+                : null;
+
+          for (let columnIndex = 0; columnIndex < 5; columnIndex += 1) {
+            const addr = XLSX.utils.encode_cell({ r: excelRowIndex, c: columnIndex });
+            if (!ws[addr]) continue;
+
+            if (podiumFill) {
+              ws[addr].s = columnIndex === 1 ? podiumNameStyle(podiumFill) : podiumStyle(podiumFill);
+            } else if (columnIndex === 1) {
+              ws[addr].s = isOdd ? nameOddStyle : nameEvenStyle;
+            } else if (columnIndex === 4) {
+              ws[addr].s = pointsStyle;
+            } else {
+              ws[addr].s = isOdd ? oddStyle : evenStyle;
+            }
+          }
+        });
+      }
+
+      const lastTableRow = Math.max(9, 8 + tableRows.length);
+      ws["!autofilter"] = { ref: `A8:E${lastTableRow}` };
+      wb.Props = {
+        Title: title,
+        Subject: `Ranking ${season}`,
+        Author: clubName,
+        CreatedDate: exportedAt,
+      };
+
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      const fileDate = exportedAt.toISOString().slice(0, 10);
+      const filename = `now-padel-ranking-${slugifyFilePart(exportCategory)}-temporada-${season}-${fileDate}.xlsx`;
+      XLSX.writeFile(wb, filename);
+
+      toast({
+        title: "Exportado",
+        description: "Classificação exportada para Excel com sucesso.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error?.message || "Não foi possível exportar a classificação.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExportingRanking(false);
+    }
+  };
+
   const rankingItems = ranking?.items ?? [];
   const scoringFormats = ranking?.rules.formats ?? [];
   const rankingTotal = ranking?.total ?? rankingItems.length;
@@ -405,6 +704,17 @@ export default function Ranking() {
               Mostrar jogadores com 0 pontos
             </Label>
           </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2 border-orange-200 bg-white text-orange-700 hover:bg-orange-50 hover:text-orange-800"
+            onClick={handleExportRanking}
+            disabled={!ranking || isRankingLoading || isExportingRanking}
+          >
+            <Download className="w-4 h-4" />
+            {isExportingRanking ? "A exportar..." : "Exportar Excel"}
+          </Button>
 
           <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
             <DialogTrigger asChild>
@@ -603,28 +913,27 @@ export default function Ranking() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <Table className="min-w-[640px]">
+            <Table className="min-w-[560px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-20">Posição</TableHead>
                   <TableHead>Jogador</TableHead>
-                  <TableHead className="hidden sm:table-cell">Nível</TableHead>
-                  <TableHead className="text-right">Pontos</TableHead>
                   <TableHead className="hidden md:table-cell text-right">Participações</TableHead>
                   <TableHead className="hidden md:table-cell text-right">Vitórias</TableHead>
+                  <TableHead className="text-right">Pontos</TableHead>
                 </TableRow>
               </TableHeader>
             <TableBody>
               {isRankingLoading && (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                     A carregar ranking...
                   </TableCell>
                 </TableRow>
               )}
               {!isRankingLoading && rankingItems.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                     Sem pontuação registada. Importa os pontos iniciais para começar.
                   </TableCell>
                 </TableRow>
@@ -636,14 +945,13 @@ export default function Ranking() {
                     <div className="flex flex-col">
                       <span>{row.name}</span>
                       <span className="text-xs text-muted-foreground sm:hidden">
-                        Nível {row.level} · Part. {row.participationCount} · Vit. {row.roundWins}
+                        Part. {row.participationCount} · Vit. {row.roundWins}
                       </span>
                     </div>
                   </TableCell>
-                  <TableCell className="hidden sm:table-cell">{row.level}</TableCell>
-                  <TableCell className="text-right font-semibold">{formatPoints(row.totalPoints)}</TableCell>
                   <TableCell className="hidden md:table-cell text-right">{row.participationCount}</TableCell>
                   <TableCell className="hidden md:table-cell text-right">{row.roundWins}</TableCell>
+                  <TableCell className="text-right font-semibold">{formatPoints(row.totalPoints)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

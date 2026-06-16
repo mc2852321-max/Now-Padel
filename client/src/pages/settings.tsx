@@ -6,7 +6,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormDescription, For
 import { Badge } from "@/components/ui/badge";
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
-import { Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Eye, EyeOff, RefreshCw, Plus } from "lucide-react";
+import { Edit2, Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Eye, EyeOff, RefreshCw, Plus } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Settings as SettingsType, AuthorizedUser, WhatsappStatusResponse } from "@shared/schema";
@@ -723,6 +723,8 @@ export default function Settings() {
       const loadedSeasons = parseRankingSeasons(settings.rankingSeasons);
       setRankingCategoriesDraft(loadedCategories);
       setRankingSeasonsDraft(loadedSeasons);
+      setCategoryPendingEditIndex(null);
+      setSeasonPendingEditIndex(null);
       setNewRankingCategoryName("");
       setNewRankingSeasonName("");
       setNewRankingSeasonStart("");
@@ -760,8 +762,10 @@ export default function Settings() {
   const [rankingCategoriesDraft, setRankingCategoriesDraft] = useState<string[]>(["Non Stop"]);
   const [rankingSeasonsDraft, setRankingSeasonsDraft] = useState<RankingSeasonConfig[]>(() => parseRankingSeasons(undefined));
   const [isAddCategoryDialogOpen, setIsAddCategoryDialogOpen] = useState(false);
+  const [categoryPendingEditIndex, setCategoryPendingEditIndex] = useState<number | null>(null);
   const [newRankingCategoryName, setNewRankingCategoryName] = useState("");
   const [isAddSeasonDialogOpen, setIsAddSeasonDialogOpen] = useState(false);
+  const [seasonPendingEditIndex, setSeasonPendingEditIndex] = useState<number | null>(null);
   const [newRankingSeasonName, setNewRankingSeasonName] = useState("");
   const [newRankingSeasonStart, setNewRankingSeasonStart] = useState("");
   const [newRankingSeasonEnd, setNewRankingSeasonEnd] = useState("");
@@ -812,7 +816,9 @@ export default function Settings() {
     }
 
     const alreadyExists = rankingCategoriesDraft.some(
-      (category) => sanitizeRankingCategoryName(category).toLocaleLowerCase("pt-PT") === cleanName.toLocaleLowerCase("pt-PT"),
+      (category, index) =>
+        index !== categoryPendingEditIndex &&
+        sanitizeRankingCategoryName(category).toLocaleLowerCase("pt-PT") === cleanName.toLocaleLowerCase("pt-PT"),
     );
     if (alreadyExists) {
       toast({
@@ -823,9 +829,23 @@ export default function Settings() {
       return;
     }
 
-    setRankingCategoriesDraft((current) => [...current, cleanName]);
+    setRankingCategoriesDraft((current) => {
+      if (typeof categoryPendingEditIndex === "number") {
+        return current.map((category, index) => index === categoryPendingEditIndex ? cleanName : category);
+      }
+      return [...current, cleanName];
+    });
+    setCategoryPendingEditIndex(null);
     setNewRankingCategoryName("");
     setIsAddCategoryDialogOpen(false);
+  };
+
+  const editRankingCategoryAt = (index: number) => {
+    const category = rankingCategoriesDraft[index];
+    if (!category) return;
+    setCategoryPendingEditIndex(index);
+    setNewRankingCategoryName(category);
+    setIsAddCategoryDialogOpen(true);
   };
 
   const requestRemoveRankingCategoryAt = (index: number) => {
@@ -878,7 +898,9 @@ export default function Settings() {
       return;
     }
     const alreadyExists = rankingSeasonsDraft.some(
-      (season) => season.name.toLocaleLowerCase("pt-PT") === cleanName.toLocaleLowerCase("pt-PT"),
+      (season, index) =>
+        index !== seasonPendingEditIndex &&
+        season.name.toLocaleLowerCase("pt-PT") === cleanName.toLocaleLowerCase("pt-PT"),
     );
     if (alreadyExists) {
       toast({
@@ -889,21 +911,41 @@ export default function Settings() {
       return;
     }
 
-    setRankingSeasonsDraft((current) =>
-      [
-        ...current,
-        {
+    setRankingSeasonsDraft((current) => {
+      const nextSeason = typeof seasonPendingEditIndex === "number"
+        ? {
+          id: current[seasonPendingEditIndex]?.id ?? getNextRankingSeasonId(newRankingSeasonStart),
+          name: cleanName,
+          startsAt: newRankingSeasonStart,
+          endsAt: newRankingSeasonEnd,
+        }
+        : {
           id: getNextRankingSeasonId(newRankingSeasonStart),
           name: cleanName,
           startsAt: newRankingSeasonStart,
           endsAt: newRankingSeasonEnd,
-        },
-      ].sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.id - b.id),
-    );
+        };
+
+      const next = typeof seasonPendingEditIndex === "number"
+        ? current.map((season, index) => index === seasonPendingEditIndex ? nextSeason : season)
+        : [...current, nextSeason];
+      return next.sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.id - b.id);
+    });
+    setSeasonPendingEditIndex(null);
     setNewRankingSeasonName("");
     setNewRankingSeasonStart("");
     setNewRankingSeasonEnd("");
     setIsAddSeasonDialogOpen(false);
+  };
+
+  const editRankingSeasonAt = (index: number) => {
+    const season = rankingSeasonsDraft[index];
+    if (!season) return;
+    setSeasonPendingEditIndex(index);
+    setNewRankingSeasonName(season.name);
+    setNewRankingSeasonStart(season.startsAt);
+    setNewRankingSeasonEnd(season.endsAt);
+    setIsAddSeasonDialogOpen(true);
   };
 
   const removeRankingSeasonAt = (index: number) => {
@@ -1345,19 +1387,31 @@ export default function Settings() {
                             {formatSeasonDate(season.startsAt)} - {formatSeasonDate(season.endsAt)}
                           </p>
                         </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          onClick={() => removeRankingSeasonAt(index)}
-                          disabled={rankingSeasonsDraft.length <= 1}
-                          title={rankingSeasonsDraft.length <= 1
-                            ? "Tem de existir pelo menos uma temporada."
-                            : "Remover temporada"}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => editRankingSeasonAt(index)}
+                            title="Editar temporada"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => removeRankingSeasonAt(index)}
+                            disabled={rankingSeasonsDraft.length <= 1}
+                            title={rankingSeasonsDraft.length <= 1
+                              ? "Tem de existir pelo menos uma temporada."
+                              : "Remover temporada"}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1366,6 +1420,7 @@ export default function Settings() {
                     onOpenChange={(open) => {
                       setIsAddSeasonDialogOpen(open);
                       if (!open) {
+                        setSeasonPendingEditIndex(null);
                         setNewRankingSeasonName("");
                         setNewRankingSeasonStart("");
                         setNewRankingSeasonEnd("");
@@ -1380,7 +1435,7 @@ export default function Settings() {
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Nova temporada</DialogTitle>
+                        <DialogTitle>{seasonPendingEditIndex == null ? "Nova temporada" : "Editar temporada"}</DialogTitle>
                         <DialogDescription>
                           Cria um período para acumular pontos, por exemplo 1.º Trimestre 2027.
                         </DialogDescription>
@@ -1422,7 +1477,7 @@ export default function Settings() {
                           Cancelar
                         </Button>
                         <Button type="button" onClick={addRankingSeason}>
-                          OK
+                          {seasonPendingEditIndex == null ? "OK" : "Guardar"}
                         </Button>
                       </DialogFooter>
                     </DialogContent>
@@ -1458,19 +1513,31 @@ export default function Settings() {
                     {rankingCategoriesDraft.map((category, index) => (
                       <div key={`ranking-category-row-${index}`} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
                         <p className="text-sm font-medium text-slate-900">{category}</p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          onClick={() => requestRemoveRankingCategoryAt(index)}
-                          disabled={rankingCategoriesDraft.length <= 1}
-                          title={rankingCategoriesDraft.length <= 1
-                            ? "Tem de existir pelo menos uma categoria."
-                            : "Remover categoria"}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => editRankingCategoryAt(index)}
+                            title="Editar categoria"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => requestRemoveRankingCategoryAt(index)}
+                            disabled={rankingCategoriesDraft.length <= 1}
+                            title={rankingCategoriesDraft.length <= 1
+                              ? "Tem de existir pelo menos uma categoria."
+                              : "Remover categoria"}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1478,7 +1545,10 @@ export default function Settings() {
                     open={isAddCategoryDialogOpen}
                     onOpenChange={(open) => {
                       setIsAddCategoryDialogOpen(open);
-                      if (!open) setNewRankingCategoryName("");
+                      if (!open) {
+                        setCategoryPendingEditIndex(null);
+                        setNewRankingCategoryName("");
+                      }
                     }}
                   >
                     <DialogTrigger asChild>
@@ -1489,7 +1559,7 @@ export default function Settings() {
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Nova categoria</DialogTitle>
+                        <DialogTitle>{categoryPendingEditIndex == null ? "Nova categoria" : "Editar categoria"}</DialogTitle>
                         <DialogDescription>
                           Escreve o nome da nova categoria para o ranking e para os novos Non Stop.
                         </DialogDescription>
@@ -1514,7 +1584,7 @@ export default function Settings() {
                           Cancelar
                         </Button>
                         <Button type="button" onClick={addRankingCategory}>
-                          OK
+                          {categoryPendingEditIndex == null ? "OK" : "Guardar"}
                         </Button>
                       </DialogFooter>
                     </DialogContent>

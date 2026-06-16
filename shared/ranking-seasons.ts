@@ -15,10 +15,11 @@ export const RANKING_SEASON_ID_MAX = 999999;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function getDefaultRankingSeasons(year = 2026): RankingSeasonConfig[] {
+  const usesNowPadel2026Calendar = year === 2026;
   return [
     { id: year * 100 + 1, name: `1.º Trimestre ${year}`, startsAt: `${year}-01-01`, endsAt: `${year}-03-31` },
-    { id: year * 100 + 2, name: `2.º Trimestre ${year}`, startsAt: `${year}-04-01`, endsAt: `${year}-06-30` },
-    { id: year * 100 + 3, name: `3.º Trimestre ${year}`, startsAt: `${year}-07-01`, endsAt: `${year}-09-30` },
+    { id: year * 100 + 2, name: `2.º Trimestre ${year}`, startsAt: `${year}-04-01`, endsAt: usesNowPadel2026Calendar ? `${year}-05-31` : `${year}-06-30` },
+    { id: year * 100 + 3, name: `3.º Trimestre ${year}`, startsAt: usesNowPadel2026Calendar ? `${year}-06-01` : `${year}-07-01`, endsAt: `${year}-09-30` },
     { id: year * 100 + 4, name: `4.º Trimestre ${year}`, startsAt: `${year}-10-01`, endsAt: `${year}-12-31` },
   ];
 }
@@ -72,12 +73,20 @@ export function parseRankingSeasons(raw: unknown, fallback = DEFAULT_RANKING_SEA
     if (!id || !isValidDateString(startsAt) || !isValidDateString(endsAt)) return;
     if (startsAt > endsAt) return;
 
-    unique.set(id, {
+    const normalizedSeason = {
       id,
       name: normalizeName(record.name, `Temporada ${id || index + 1}`),
       startsAt,
       endsAt,
-    });
+    };
+    if (id === 202602 && normalizedSeason.endsAt === "2026-06-30") {
+      normalizedSeason.endsAt = "2026-05-31";
+    }
+    if (id === 202603 && normalizedSeason.startsAt === "2026-07-01") {
+      normalizedSeason.startsAt = "2026-06-01";
+    }
+
+    unique.set(id, normalizedSeason);
   });
 
   if (unique.size === 0) return fallback;

@@ -1611,6 +1611,13 @@ export async function registerRoutes(
     `);
 
     await db.execute(sql`
+      UPDATE ranking_entries
+      SET season_year = 202603
+      WHERE season_year = 202602
+        AND LOWER(category) LIKE '%nownights-quinta-feira m5a-m4b%'
+    `);
+
+    await db.execute(sql`
       ALTER TABLE ranking_entries
       ALTER COLUMN season_year SET NOT NULL
     `);

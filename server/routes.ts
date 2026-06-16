@@ -111,12 +111,10 @@ function normalizePlayerPhone(value: unknown): string {
   return typeof value === "string" ? value.replace(/\D/g, "") : "";
 }
 
-function getPlayerCreateKeys(player: { name?: unknown; phone?: unknown }): string[] {
+function getPlayerCreateKeys(player: { name?: unknown }): string[] {
   const keys: string[] = [];
   const name = normalizePlayerName(player.name);
-  const phone = normalizePlayerPhone(player.phone);
   if (name) keys.push(`name:${name}`);
-  if (phone) keys.push(`phone:${phone}`);
   return keys;
 }
 
@@ -124,7 +122,7 @@ function findDuplicatePlayer(
   players: Array<{ id: number; name: string; phone: string }>,
   player: { name?: unknown; phone?: unknown },
   excludePlayerId?: number,
-  checks: { name?: boolean; phone?: boolean } = { name: true, phone: true },
+  checks: { name?: boolean; phone?: boolean } = { name: true, phone: false },
 ): { message: string } | null {
   const name = normalizePlayerName(player.name);
   const phone = normalizePlayerPhone(player.phone);
@@ -571,7 +569,7 @@ export async function registerRoutes(
       createKeys.forEach((key) => pendingPlayerCreateKeys.add(key));
       try {
         const existingPlayers = await storage.getPlayers();
-        const duplicate = findDuplicatePlayer(existingPlayers, input);
+        const duplicate = findDuplicatePlayer(existingPlayers, input, undefined, { name: true, phone: false });
         if (duplicate) {
           return res.status(409).json({ message: duplicate.message });
         }
@@ -602,11 +600,9 @@ export async function registerRoutes(
 
       const checkName = input.name !== undefined
         && normalizePlayerName(input.name) !== normalizePlayerName(currentPlayer.name);
-      const checkPhone = input.phone !== undefined
-        && normalizePlayerPhone(input.phone) !== normalizePlayerPhone(currentPlayer.phone);
       const duplicate = findDuplicatePlayer(existingPlayers, input, id, {
         name: checkName,
-        phone: checkPhone,
+        phone: false,
       });
       if (duplicate) {
         return res.status(409).json({ message: duplicate.message });

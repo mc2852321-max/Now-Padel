@@ -10,7 +10,7 @@ import { Image, Loader2, Volume2, UserPlus, Trash2, Shield, Key, Eye, EyeOff, Re
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Settings as SettingsType, AuthorizedUser, WhatsappStatusResponse } from "@shared/schema";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -766,6 +766,38 @@ export default function Settings() {
   const [newRankingSeasonStart, setNewRankingSeasonStart] = useState("");
   const [newRankingSeasonEnd, setNewRankingSeasonEnd] = useState("");
 
+  useEffect(() => {
+    form.setValue("nonstopCategories", categoriesToLineList(rankingCategoriesDraft), { shouldDirty: false });
+  }, [form, rankingCategoriesDraft]);
+
+  useEffect(() => {
+    form.setValue("rankingSeasons", serializeRankingSeasons(rankingSeasonsDraft), { shouldDirty: false });
+  }, [form, rankingSeasonsDraft]);
+
+  const savedRankingCategories = useMemo(
+    () => parseLineListSetting(settings?.nonstopCategories, ["Non Stop"]),
+    [settings?.nonstopCategories],
+  );
+  const savedRankingSeasons = useMemo(
+    () => parseRankingSeasons(settings?.rankingSeasons),
+    [settings?.rankingSeasons],
+  );
+  const rankingCategoriesDirty = Boolean(settings) &&
+    categoriesToLineList(rankingCategoriesDraft) !== categoriesToLineList(savedRankingCategories);
+  const rankingSeasonsDirty = Boolean(settings) &&
+    serializeRankingSeasons(rankingSeasonsDraft) !== serializeRankingSeasons(savedRankingSeasons);
+  const rankingConfigDirty = rankingCategoriesDirty || rankingSeasonsDirty;
+
+  useEffect(() => {
+    if (!rankingConfigDirty) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [rankingConfigDirty]);
+
   const sanitizeRankingCategoryName = (value: string) => value.trim().replace(/\s+/g, " ");
 
   const addRankingCategory = () => {
@@ -883,7 +915,7 @@ export default function Settings() {
   };
 
   const mutation = useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: any): Promise<SettingsType> => {
       const res = await apiRequest("POST", "/api/settings", {
         ...data,
         playerProfileOptions: encodeLineListSetting(data.playerProfileOptions, ["Academia", "Fecha jogos", "Non Stop"]),
@@ -895,10 +927,12 @@ export default function Settings() {
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (savedSettings) => {
+      queryClient.setQueryData(["/api/settings"], savedSettings);
       queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/ranking"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/ranking/history"] });
+      queryClient.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/ranking"),
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/nonstop/current"] });
       queryClient.invalidateQueries({
         predicate: (query) => String(query.queryKey[0] ?? "").startsWith("/api/nonstop/events"),
@@ -1289,7 +1323,14 @@ export default function Settings() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Temporadas do Ranking</CardTitle>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle>Temporadas do Ranking</CardTitle>
+                    {rankingSeasonsDirty ? (
+                      <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
+                        Por guardar
+                      </Badge>
+                    ) : null}
+                  </div>
                   <CardDescription>
                     Define os períodos onde os rankings acumulam pontos. Os trimestres de 2026 já ficam criados.
                   </CardDescription>
@@ -1386,6 +1427,12 @@ export default function Settings() {
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
+                  {rankingSeasonsDirty ? (
+                    <Button type="submit" className="w-full sm:w-auto" disabled={mutation.isPending}>
+                      {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Guardar alterações
+                    </Button>
+                  ) : null}
                   <FormDescription>
                     Ao finalizar um Non Stop, os pontos entram automaticamente na temporada correspondente à data do evento.
                   </FormDescription>
@@ -1394,7 +1441,14 @@ export default function Settings() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Categorias do Ranking</CardTitle>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle>Categorias do Ranking</CardTitle>
+                    {rankingCategoriesDirty ? (
+                      <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
+                        Por guardar
+                      </Badge>
+                    ) : null}
+                  </div>
                   <CardDescription>
                     Escolhe os rankings/categorias disponíveis dentro de cada temporada e no Non Stop.
                   </CardDescription>
@@ -1465,8 +1519,14 @@ export default function Settings() {
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
+                  {rankingCategoriesDirty ? (
+                    <Button type="submit" className="w-full sm:w-auto" disabled={mutation.isPending}>
+                      {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Guardar alterações
+                    </Button>
+                  ) : null}
                   <FormDescription>
-                    Ao remover uma categoria, os pontos dessa categoria deixam de existir no ranking.
+                    Ao remover uma categoria, ela deixa de aparecer nos novos Non Stops. O histórico e os pontos já registados continuam disponíveis nas temporadas anteriores.
                   </FormDescription>
                 </CardContent>
               </Card>
@@ -1695,7 +1755,7 @@ export default function Settings() {
                   <AlertDialogHeader>
                     <AlertDialogTitle>Eliminar esta categoria?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Ao eliminar esta categoria, todos os pontos associados aos jogadores nesta categoria serão removidos quando guardares as alterações.
+                      Ao eliminar esta categoria, ela deixa de aparecer nos novos Non Stops. O histórico e os pontos já registados continuam disponíveis.
                     </AlertDialogDescription>
                     {categoryPendingDelete ? (
                       <p className="text-sm text-muted-foreground">

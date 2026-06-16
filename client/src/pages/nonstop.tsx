@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { format } from "date-fns";
 import { AnimatePresence, motion } from "framer-motion";
+import { getRankingSeasonForDate, parseRankingSeasons } from "@shared/ranking-seasons";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 type TimerSound = 'start-warmup' | 'start-game' | 'end-game' | 'final';
@@ -267,6 +268,29 @@ export default function Nonstop() {
     () => parseNonstopCategories(settings?.nonstopCategories),
     [settings?.nonstopCategories],
   );
+  const rankingSeasons = useMemo(
+    () => parseRankingSeasons(settings?.rankingSeasons),
+    [settings?.rankingSeasons],
+  );
+  const rankingSeasonById = useMemo(
+    () => new Map(rankingSeasons.map((season) => [season.id, season])),
+    [rankingSeasons],
+  );
+  const eventSeason = useMemo(
+    () => getRankingSeasonForDate(rankingSeasons, eventDateInput || new Date()),
+    [eventDateInput, rankingSeasons],
+  );
+  const handleEventSeasonChange = useCallback((value: string) => {
+    const seasonId = Number(value);
+    const season = rankingSeasonById.get(seasonId);
+    if (!season) return;
+
+    const selectedDate = eventDateInput || toLisbonDayKey(new Date());
+    if (season.startsAt <= selectedDate && selectedDate <= season.endsAt) return;
+
+    const today = toLisbonDayKey(new Date());
+    setEventDateInput(season.startsAt <= today && today <= season.endsAt ? today : season.startsAt);
+  }, [eventDateInput, rankingSeasonById]);
 
   const playersQuery = useQuery<PlayersPageResponse>({
     queryKey: ["/api/players", "all"],
@@ -535,8 +559,8 @@ export default function Nonstop() {
     ? (editableEvent.category || configuredCategories[0] || DEFAULT_NONSTOP_CATEGORY)
     : "";
   const currentEventSeasonYear = editableEvent
-    ? Number(toLisbonDayKey(editableEvent.startedAt ?? editableEvent.createdAt).slice(0, 4)) || new Date().getFullYear()
-    : new Date().getFullYear();
+    ? getRankingSeasonForDate(rankingSeasons, editableEvent.startedAt ?? editableEvent.createdAt).id
+    : eventSeason.id;
   const rankingContextEvent = presentationFinalizedEventId
     ? presentationDisplayEvent
     : editableEvent;
@@ -544,7 +568,7 @@ export default function Nonstop() {
     ? (rankingContextEvent.category || configuredCategories[0] || DEFAULT_NONSTOP_CATEGORY)
     : currentEventCategoryKey;
   const rankingContextSeasonYear = rankingContextEvent
-    ? Number(toLisbonDayKey(rankingContextEvent.startedAt ?? rankingContextEvent.createdAt).slice(0, 4)) || currentEventSeasonYear
+    ? getRankingSeasonForDate(rankingSeasons, rankingContextEvent.startedAt ?? rankingContextEvent.createdAt).id
     : currentEventSeasonYear;
   const rankingPreviewCategory = rankingContextCategoryKey || eventCategoryInput || DEFAULT_NONSTOP_CATEGORY;
   const rankingPreviewQuery = useQuery<RankingPreviewResponse>({
@@ -3346,6 +3370,80 @@ export default function Nonstop() {
               </Badge>
             ) : null}
           </div>
+          {editableEvent && !readOnlyMode ? (
+            <div
+              className={cn(
+                "flex flex-wrap items-center gap-2 rounded-xl border border-orange-100 bg-white/80 p-2 shadow-sm backdrop-blur-md",
+                isPresentationMode && "hidden",
+              )}
+            >
+              <span className="px-1 text-[10px] font-bold uppercase tracking-widest text-orange-600">
+                Ranking
+              </span>
+              <Select value={String(eventSeason.id)} onValueChange={handleEventSeasonChange}>
+                <SelectTrigger className="h-9 w-[190px] bg-white text-[12px] font-medium text-slate-900">
+                  <SelectValue placeholder="Temporada" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[320px]">
+                  {rankingSeasons.map((season) => (
+                    <SelectItem key={`nonstop-season-${season.id}`} value={String(season.id)}>
+                      {season.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={eventCategoryInput} onValueChange={setEventCategoryInput}>
+                <SelectTrigger className="h-9 w-[170px] bg-white text-[12px] font-medium text-slate-900">
+                  <SelectValue placeholder="Categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  {configuredCategories.map((category) => (
+                    <SelectItem key={`event-category-${category}`} value={category}>
+                      {category}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                type="date"
+                value={eventDateInput}
+                onChange={(event) => setEventDateInput(event.target.value)}
+                className="h-9 w-[145px] bg-white text-[12px] font-medium text-slate-900"
+                title="Dia do Non Stop"
+              />
+              <Input
+                type="time"
+                value={eventTimeInput}
+                onChange={(event) => setEventTimeInput(event.target.value)}
+                className="h-9 w-[105px] bg-white text-[12px] font-medium text-slate-900"
+                title="Hora do Non Stop"
+              />
+              {hasEventMetadataChanges ? (
+                <Badge variant="outline" className="h-8 border-orange-200 bg-orange-50 px-2 text-[10px] font-medium text-orange-700">
+                  Por guardar
+                </Badge>
+              ) : null}
+              <Button
+                size="sm"
+                className="h-9 gap-1.5 bg-orange-600 px-3 text-[11px] font-semibold text-white hover:bg-orange-500"
+                disabled={
+                  updateEventMetadataMutation.isPending ||
+                  !eventDateInput ||
+                  !eventTimeInput ||
+                  !eventCategoryInput ||
+                  !hasEventMetadataChanges
+                }
+                onClick={() => {
+                  void saveEventMetadata();
+                }}
+                title="Guardar temporada, data, hora e categoria"
+              >
+                <Save className="w-3.5 h-3.5" />
+                Guardar
+              </Button>
+            </div>
+          ) : null}
+
           {!isPresentationMode ? (
             <Card className={cn(
               "flex items-center justify-between gap-4 px-4 py-2 border-2 sm:min-w-[420px] sm:ml-auto md:mr-[4.5rem]",
@@ -3669,65 +3767,22 @@ export default function Nonstop() {
             <DialogContent className="sm:max-w-lg">
               <DialogHeader><DialogTitle>Adicionar dupla</DialogTitle></DialogHeader>
               {editableEvent && !readOnlyMode ? (
-                <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-start justify-between gap-2">
+                <div className="rounded-md border border-orange-100 bg-orange-50/80 p-3">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
-                      <span className="text-xs font-semibold uppercase text-slate-600">Data, hora e categoria no histórico</span>
-                      <p className="text-xs leading-snug text-slate-500">
-                        Fica registada no histórico deste Non Stop.
+                      <span className="text-xs font-semibold uppercase text-orange-700">Contexto do ranking</span>
+                      <p className="text-sm font-semibold text-slate-900">
+                        {eventSeason.name} · {eventCategoryInput}
+                      </p>
+                      <p className="text-xs leading-snug text-slate-600">
+                        Esta dupla entra neste Non Stop. Altera a temporada ou categoria na barra de topo antes de adicionar.
                       </p>
                     </div>
                     {hasEventMetadataChanges ? (
                       <Badge variant="outline" className="h-6 border-orange-200 bg-orange-50 px-2 text-[10px] font-medium text-orange-700">
-                        Por guardar
+                        Guarda ao adicionar
                       </Badge>
                     ) : null}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Input
-                      type="date"
-                      value={eventDateInput}
-                      onChange={(event) => setEventDateInput(event.target.value)}
-                      className="h-9 min-w-[145px] flex-1 bg-white text-[12px] font-medium text-slate-900"
-                      title="Dia do Non Stop"
-                    />
-                    <Input
-                      type="time"
-                      value={eventTimeInput}
-                      onChange={(event) => setEventTimeInput(event.target.value)}
-                      className="h-9 w-[105px] bg-white text-[12px] font-medium text-slate-900"
-                      title="Hora do Non Stop"
-                    />
-                    <Select value={eventCategoryInput} onValueChange={setEventCategoryInput}>
-                      <SelectTrigger className="h-9 min-w-[150px] flex-1 bg-white text-[12px] font-medium text-slate-900">
-                        <SelectValue placeholder="Categoria" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {configuredCategories.map((category) => (
-                          <SelectItem key={`event-category-${category}`} value={category}>
-                            {category}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      size="sm"
-                      className="h-9 gap-1.5 bg-orange-600 px-3 text-[11px] font-semibold text-white hover:bg-orange-500"
-                      disabled={
-                        updateEventMetadataMutation.isPending ||
-                        !eventDateInput ||
-                        !eventTimeInput ||
-                        !eventCategoryInput ||
-                        !hasEventMetadataChanges
-                      }
-                      onClick={() => {
-                        void saveEventMetadata();
-                      }}
-                      title="Guardar data, hora e categoria"
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      Guardar
-                    </Button>
                   </div>
                 </div>
               ) : null}

@@ -570,16 +570,26 @@ export class LocalStorage implements IStorage {
   }
 
   async updateSettings(update: Partial<InsertSettings>): Promise<Settings> {
+    const currentCategories = this.parseNonstopCategoriesFrom(this.settings.nonstopCategories);
+    const nextCategories = update.nonstopCategories !== undefined
+      ? this.parseNonstopCategoriesFrom(update.nonstopCategories)
+      : currentCategories;
+    const removedCategories = currentCategories.filter((category) => !nextCategories.includes(category));
+    const fallbackCategory = nextCategories[0] ?? DEFAULT_NONSTOP_CATEGORY;
+
     this.settings = {
       ...this.settings,
       ...update,
       nonstopCategories: update.nonstopCategories !== undefined
-        ? JSON.stringify(this.parseNonstopCategoriesFrom(update.nonstopCategories))
+        ? JSON.stringify(nextCategories)
         : this.settings.nonstopCategories,
       rankingSeasons: update.rankingSeasons !== undefined
         ? serializeRankingSeasons(update.rankingSeasons)
         : this.settings.rankingSeasons,
     };
+    if (removedCategories.includes(this.normalizeNonstopCategory(this.event.category)) && this.event.status !== "completed") {
+      this.event = { ...this.event, category: fallbackCategory };
+    }
     return this.settings;
   }
 
@@ -712,15 +722,16 @@ export class LocalStorage implements IStorage {
     return Array.from(categorySet);
   }
 
-  async getRankingHistory(opts?: { category?: string; limitSeasons?: number }): Promise<RankingSeasonHistoryRow[]> {
+  async getRankingHistory(opts?: { category?: string; limitSeasons?: number; referenceSeason?: number }): Promise<RankingSeasonHistoryRow[]> {
     const limitSeasons = Number.isFinite(opts?.limitSeasons)
       ? Math.min(5, Math.max(1, Math.trunc(Number(opts?.limitSeasons))))
       : 2;
-    const today = this.getLisbonDateKey(new Date());
-    const seasons = (await this.getRankingSeasonOptions())
-      .filter((season) => season.startsAt <= today || !season.configured)
-      .slice(0, limitSeasons)
-      .map((season) => season.id);
+    const orderedSeasonIds = (await this.getRankingSeasonOptions()).map((season) => season.id);
+    const referenceSeason = normalizeRankingSeasonId(opts?.referenceSeason)
+      ?? await this.getCurrentRankingSeasonId();
+    const referenceIndex = orderedSeasonIds.indexOf(referenceSeason);
+    const startIndex = referenceIndex >= 0 ? referenceIndex : 0;
+    const seasons = orderedSeasonIds.slice(startIndex, startIndex + limitSeasons);
 
     const includeAllCategories = typeof opts?.category === "string" && opts.category.trim().toLowerCase() === RANKING_ALL_CATEGORIES_TOKEN;
     const categories = await this.getRankingCategories();

@@ -98,17 +98,17 @@ export const rankingEntries = pgTable("ranking_entries", {
 });
 
 export const insertPlayerSchema = createInsertSchema(players).omit({ id: true }).extend({
-  name: z.string().min(1, "O nome e obrigatorio"),
-  phone: z.string().min(1, "O telemovel e obrigatorio"),
-  level: z.string().min(1, "O nivel e obrigatorio").refine((val) => val !== "placeholder", {
-    message: "Por favor selecione um nivel valido",
+  name: z.string().min(1, "O nome é obrigatório"),
+  phone: z.string().min(1, "O telemóvel é obrigatório"),
+  level: z.string().min(1, "O nível é obrigatório").refine((val) => val !== "placeholder", {
+    message: "Por favor selecione um nível válido",
   }),
 });
 
 export const insertTeamSchema = createInsertSchema(teams)
   .omit({ id: true, eventId: true })
   .extend({
-    name: z.string().min(1, "O nome da equipa e obrigatorio"),
+    name: z.string().min(1, "O nome da equipa é obrigatório"),
     playerAId: z.number({
       required_error: "Seleciona o jogador A",
       invalid_type_error: "Seleciona o jogador A",
@@ -259,7 +259,7 @@ export const authorizedUsers = pgTable("authorized_users", {
 });
 
 export const insertAuthorizedUserSchema = createInsertSchema(authorizedUsers).omit({ id: true, addedAt: true, password: true }).extend({
-  email: z.string().email("Email invalido").min(1, "O email e obrigatorio"),
+  email: z.string().email("Email inválido").min(1, "O email é obrigatório"),
 });
 export type AuthorizedUser = typeof authorizedUsers.$inferSelect;
 export type InsertAuthorizedUser = z.infer<typeof insertAuthorizedUserSchema>;
@@ -271,14 +271,14 @@ export type CreateAuthorizedUserRequest = z.infer<typeof createAuthorizedUserReq
 
 // Login schema
 export const loginSchema = z.object({
-  email: z.string().email("Email invalido"),
-  password: z.string().min(1, "A password e obrigatoria"),
+  email: z.string().email("Email inválido"),
+  password: z.string().min(1, "A password é obrigatória"),
 });
 export type LoginRequest = z.infer<typeof loginSchema>;
 
 // Change password schema
 export const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1, "A password atual e obrigatoria"),
+  currentPassword: z.string().min(1, "A password atual é obrigatória"),
   newPassword: z.string().min(4, "A nova password deve ter pelo menos 4 caracteres"),
 });
 export type ChangePasswordRequest = z.infer<typeof changePasswordSchema>;

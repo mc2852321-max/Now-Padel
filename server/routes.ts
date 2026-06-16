@@ -52,16 +52,16 @@ const finalizeAndStartSchema = z.object({
 
 const nonstopEventMetadataSchema = z.object({
   label: z.string().max(120).nullable().optional(),
-  category: z.string().trim().min(1, "Categoria obrigatoria").max(60).optional(),
+  category: z.string().trim().min(1, "Categoria obrigatória").max(60).optional(),
   eventDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
     const [year, month, day] = value.split("-").map(Number);
     const parsed = new Date(Date.UTC(year, month - 1, day));
     return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
-  }, "Data invalida").optional(),
+  }, "Data inválida").optional(),
   eventTime: z.string().regex(/^\d{2}:\d{2}$/).refine((value) => {
     const [hour, minute] = value.split(":").map(Number);
     return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
-  }, "Hora invalida").optional(),
+  }, "Hora inválida").optional(),
 });
 const LISBON_TIMEZONE = "Europe/Lisbon";
 const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
@@ -611,7 +611,7 @@ export async function registerRoutes(
       if (input.category !== undefined) {
         const nextCategory = normalizeCategoryName(input.category);
         if (!nextCategory) {
-          return res.status(400).json({ message: "Categoria invalida" });
+          return res.status(400).json({ message: "Categoria inválida" });
         }
         const appSettings = await storage.getSettings();
         const configuredCategories = parseConfiguredNonstopCategories(appSettings.nonstopCategories);
@@ -903,6 +903,7 @@ export async function registerRoutes(
 
       res.json({
         season,
+        currentSeason,
         category,
         scope: shouldIncludeAllCategories ? "all" : "category",
         availableSeasons,
@@ -988,16 +989,18 @@ export async function registerRoutes(
   app.get("/api/ranking/history", isAuthenticated, async (req, res) => {
     try {
       const requestedCategory = normalizeCategoryName(req.query.category);
+      const requestedSeason = parseSeasonYear(req.query.season);
       const scope = parseRankingScope(req.query.scope);
       const shouldIncludeAllCategories = scope === "all" || requestedCategory === RANKING_ALL_CATEGORIES_TOKEN;
       const parsedLimit = Number(req.query.limitSeasons ?? 2);
       const limitSeasons = Number.isFinite(parsedLimit)
         ? Math.min(5, Math.max(1, Math.trunc(parsedLimit)))
         : 2;
-      const [availableCategories, availableSeasons, seasonOptions] = await Promise.all([
+      const [availableCategories, availableSeasons, seasonOptions, currentSeason] = await Promise.all([
         storage.getRankingCategories(),
         storage.getRankingSeasons(),
         storage.getRankingSeasonOptions(),
+        storage.getCurrentRankingSeasonId(),
       ]);
       const category = shouldIncludeAllCategories
         ? RANKING_GENERAL_LABEL
@@ -1009,12 +1012,14 @@ export async function registerRoutes(
       const items = await storage.getRankingHistory({
         category: shouldIncludeAllCategories ? RANKING_ALL_CATEGORIES_TOKEN : category,
         limitSeasons,
+        referenceSeason: requestedSeason,
       });
 
       res.json({
         category,
         scope: shouldIncludeAllCategories ? "all" : "category",
         limitSeasons,
+        currentSeason,
         availableCategories,
         availableSeasons,
         seasonOptions,
@@ -1035,7 +1040,7 @@ export async function registerRoutes(
 
       if (invalidRows.length > 0) {
         return res.status(400).json({
-          message: "Existem jogadores invalidos na importacao",
+          message: "Existem jogadores inválidos na importação",
           invalidPlayerIds: invalidRows.map((row) => row.playerId),
         });
       }

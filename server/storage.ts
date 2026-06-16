@@ -184,7 +184,7 @@ export interface IStorage {
   getRankingSeasonOptions(): Promise<RankingSeasonOption[]>;
   getCurrentRankingSeasonId(dateLike?: Date | string | null): Promise<number>;
   getRankingCategories(): Promise<string[]>;
-  getRankingHistory(opts?: { category?: string; limitSeasons?: number }): Promise<RankingSeasonHistoryRow[]>;
+  getRankingHistory(opts?: { category?: string; limitSeasons?: number; referenceSeason?: number }): Promise<RankingSeasonHistoryRow[]>;
   importRankingBasePoints(rows: RankingImportRow[], opts?: { batchLabel?: string; seasonYear?: number; category?: string; userEmail?: string | null }): Promise<number>;
 
   // Authorized Users
@@ -1102,18 +1102,13 @@ export class DatabaseStorage implements IStorage {
         .returning();
 
       if (removedCategories.length > 0) {
-        const rankingWhere = removedCategories.length === 1
-          ? eq(rankingEntries.category, removedCategories[0])
-          : inArray(rankingEntries.category, removedCategories);
-        await tx.delete(rankingEntries).where(rankingWhere);
-
         const eventWhere = removedCategories.length === 1
           ? eq(nonstopEvents.category, removedCategories[0])
           : inArray(nonstopEvents.category, removedCategories);
         await tx
           .update(nonstopEvents)
           .set({ category: fallbackCategory })
-          .where(eventWhere);
+          .where(and(eventWhere, sql`${nonstopEvents.status} <> 'completed'`));
       }
 
       return updated;
@@ -1307,7 +1302,7 @@ export class DatabaseStorage implements IStorage {
     return [...configured, ...extras];
   }
 
-  async getRankingHistory(opts?: { category?: string; limitSeasons?: number }): Promise<RankingSeasonHistoryRow[]> {
+  async getRankingHistory(opts?: { category?: string; limitSeasons?: number; referenceSeason?: number }): Promise<RankingSeasonHistoryRow[]> {
     const categories = await this.getRankingCategories();
     const shouldIncludeAllCategories = this.isAllCategoriesSelection(opts?.category);
     let targetCategory = RANKING_ALL_CATEGORIES_TOKEN;
@@ -1321,12 +1316,13 @@ export class DatabaseStorage implements IStorage {
     const limitSeasons = Number.isFinite(opts?.limitSeasons)
       ? Math.min(5, Math.max(1, Math.trunc(Number(opts?.limitSeasons))))
       : 2;
-    const today = this.getLisbonDateKey(new Date());
     const seasonOptions = await this.getRankingSeasonOptions();
-    const seasons = seasonOptions
-      .filter((season) => season.startsAt <= today || !season.configured)
-      .slice(0, limitSeasons)
-      .map((season) => season.id);
+    const orderedSeasonIds = seasonOptions.map((season) => season.id);
+    const referenceSeason = normalizeRankingSeasonId(opts?.referenceSeason)
+      ?? await this.getCurrentRankingSeasonId();
+    const referenceIndex = orderedSeasonIds.indexOf(referenceSeason);
+    const startIndex = referenceIndex >= 0 ? referenceIndex : 0;
+    const seasons = orderedSeasonIds.slice(startIndex, startIndex + limitSeasons);
     const history: RankingSeasonHistoryRow[] = [];
 
     for (const season of seasons) {

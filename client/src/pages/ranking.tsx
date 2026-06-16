@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -41,6 +41,7 @@ type RankingRuleFormat = {
 
 type RankingResponse = {
   season: number;
+  currentSeason: number;
   category: string;
   scope?: "category" | "all";
   availableSeasons: number[];
@@ -81,6 +82,7 @@ type RankingHistoryResponse = {
   category: string;
   scope?: "category" | "all";
   limitSeasons: number;
+  currentSeason?: number;
   availableCategories: string[];
   availableSeasons: number[];
   seasonOptions?: RankingSeasonOption[];
@@ -203,11 +205,16 @@ export default function Ranking() {
   const rankingHistoryCategory = isGeneralCategorySelected
     ? ALL_CATEGORIES_VALUE
     : (selectedCategory ?? ranking?.category);
+  const rankingHistoryReferenceSeason = selectedSeason ?? ranking?.season;
   const { data: rankingHistory, isLoading: isRankingHistoryLoading } = useQuery<RankingHistoryResponse>({
-    queryKey: ["/api/ranking/history", { category: rankingHistoryCategory ?? "all", limitSeasons: 2 }],
+    queryKey: ["/api/ranking/history", { category: rankingHistoryCategory ?? "all", season: rankingHistoryReferenceSeason ?? "current", limitSeasons: 2 }],
+    enabled: Boolean(rankingHistoryReferenceSeason),
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("limitSeasons", "2");
+      if (typeof rankingHistoryReferenceSeason === "number") {
+        params.set("season", String(rankingHistoryReferenceSeason));
+      }
       if (rankingHistoryCategory === ALL_CATEGORIES_VALUE) {
         params.set("scope", "all");
       } else if (rankingHistoryCategory) {
@@ -253,6 +260,12 @@ export default function Ranking() {
   useEffect(() => {
     setPage(1);
   }, [selectedSeason, selectedCategory, showZeroPlayers]);
+
+  useEffect(() => {
+    if (typeof selectedSeason === "number" && ranking?.currentSeason === selectedSeason) {
+      setSelectedSeason(undefined);
+    }
+  }, [ranking?.currentSeason, selectedSeason]);
 
   useEffect(() => {
     if (ranking && ranking.page !== page) {
@@ -609,10 +622,45 @@ export default function Ranking() {
     ? "Geral (todas as categorias)"
     : (ranking?.category ?? "-");
   const seasonOptions = ranking?.seasonOptions ?? rankingHistory?.seasonOptions ?? [];
+  const seasonMetaById = useMemo(() => new Map(seasonOptions.map((season) => [season.id, season])), [seasonOptions]);
+  const currentSeason = ranking?.currentSeason ?? rankingHistory?.currentSeason;
+  const seasonOptionIds = useMemo(() => {
+    const ids = ranking?.seasonOptions?.length
+      ? ranking.seasonOptions.map((season) => season.id)
+      : (ranking?.availableSeasons ?? []);
+    return Array.from(new Set(ids));
+  }, [ranking?.availableSeasons, ranking?.seasonOptions]);
+  const seasonGroups = useMemo(() => {
+    const groups = new Map<string, number[]>();
+    seasonOptionIds.forEach((seasonId) => {
+      const option = seasonMetaById.get(seasonId);
+      const configuredYear = option?.startsAt?.slice(0, 4);
+      const year = configuredYear && /^\d{4}$/.test(configuredYear)
+        ? configuredYear
+        : String(seasonId >= 200000 ? Math.floor(seasonId / 100) : seasonId);
+      groups.set(year, [...(groups.get(year) ?? []), seasonId]);
+    });
+
+    return Array.from(groups.entries())
+      .map(([year, seasons]) => ({
+        year,
+        seasons: seasons.sort((a, b) => {
+          const startA = seasonMetaById.get(a)?.startsAt ?? "";
+          const startB = seasonMetaById.get(b)?.startsAt ?? "";
+          return startB.localeCompare(startA) || b - a;
+        }),
+      }))
+      .sort((a, b) => Number(b.year) - Number(a.year));
+  }, [seasonMetaById, seasonOptionIds]);
   const seasonLabel = ranking
     ? getRankingSeasonLabel(ranking.season, seasonOptions)
     : "-";
   const getSeasonLabel = (seasonId: number) => getRankingSeasonLabel(seasonId, seasonOptions);
+  const handleSeasonChange = (value: string) => {
+    const nextSeason = Number(value);
+    if (!Number.isFinite(nextSeason)) return;
+    setSelectedSeason(nextSeason === currentSeason ? undefined : nextSeason);
+  };
 
   return (
     <div className="space-y-6">
@@ -666,17 +714,34 @@ export default function Ranking() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Select
             value={String(selectedSeason ?? ranking?.season ?? "")}
-            onValueChange={(value) => setSelectedSeason(Number(value))}
+            onValueChange={handleSeasonChange}
             disabled={!ranking}
           >
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="Temporada" />
             </SelectTrigger>
-            <SelectContent>
-              {(ranking?.seasonOptions?.length ? ranking.seasonOptions.map((season) => season.id) : ranking?.availableSeasons ?? []).map((season) => (
-                <SelectItem key={`season-option-${season}`} value={String(season)}>
-                  {getSeasonLabel(season)}
-                </SelectItem>
+            <SelectContent className="max-h-[340px]">
+              {seasonGroups.map((group, groupIndex) => (
+                <div key={`season-year-${group.year}`}>
+                  <SelectGroup>
+                    <SelectLabel className="py-1 pl-8 pr-2 text-xs uppercase tracking-wide text-muted-foreground">
+                      {group.year}
+                    </SelectLabel>
+                    {group.seasons.map((season) => (
+                      <SelectItem key={`season-option-${season}`} value={String(season)}>
+                        <span className="flex w-full items-center justify-between gap-3">
+                          <span className="truncate">{getSeasonLabel(season)}</span>
+                          {season === currentSeason && (
+                            <span className="rounded-sm bg-orange-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-primary">
+                              Atual
+                            </span>
+                          )}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                  {groupIndex < seasonGroups.length - 1 && <SelectSeparator />}
+                </div>
               ))}
             </SelectContent>
           </Select>

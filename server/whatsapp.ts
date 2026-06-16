@@ -328,7 +328,7 @@ export async function sendWhatsappMessages(recipients: WhatsappRecipient[]): Pro
         phone: recipient.player.phone,
         number: null,
         status: "skipped",
-        error: "Numero WhatsApp invalido.",
+        error: "Número WhatsApp inválido.",
       });
       continue;
     }

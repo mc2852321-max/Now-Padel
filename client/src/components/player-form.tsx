@@ -55,6 +55,7 @@ export function PlayerForm({
   });
 
   const selectedTags = parseArrayField(form.watch("profileTags"));
+  const isSaving = isSubmitting || form.formState.isSubmitting;
 
   return (
     <Form {...form}>
@@ -159,8 +160,8 @@ export function PlayerForm({
             </FormItem>
           )}
         />
-        <Button type="submit" className="w-full" disabled={isSubmitting}>
-          {isSubmitting ? "A guardar..." : submitLabel}
+        <Button type="submit" className="w-full" disabled={isSaving}>
+          {isSaving ? "A guardar..." : submitLabel}
         </Button>
       </form>
     </Form>

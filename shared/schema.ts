@@ -98,9 +98,15 @@ export const rankingEntries = pgTable("ranking_entries", {
 });
 
 export const insertPlayerSchema = createInsertSchema(players).omit({ id: true }).extend({
-  name: z.string().min(1, "O nome é obrigatório"),
-  phone: z.string().min(1, "O telemóvel é obrigatório"),
-  level: z.string().min(1, "O nível é obrigatório").refine((val) => val !== "placeholder", {
+  name: z.string()
+    .trim()
+    .transform((value) => value.replace(/\s+/g, " "))
+    .refine((value) => value.length > 0, "O nome é obrigatório"),
+  phone: z.string()
+    .trim()
+    .transform((value) => value.replace(/\D/g, ""))
+    .refine((value) => value.length > 0, "O telemóvel é obrigatório"),
+  level: z.string().trim().min(1, "O nível é obrigatório").refine((val) => val !== "placeholder", {
     message: "Por favor selecione um nível válido",
   }),
 });

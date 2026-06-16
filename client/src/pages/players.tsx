@@ -56,7 +56,7 @@ import {
 import { SiWhatsapp } from "react-icons/si";
 import { Plus, Trash2, Edit2, Filter, Clock, Calendar as CalendarIcon, Search, ChevronDown, Loader2, ExternalLink } from "lucide-react";
 import { useState, useEffect } from "react";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, getApiErrorMessage } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format, isToday, isTomorrow } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -223,7 +223,14 @@ export default function Players() {
       queryClient.invalidateQueries({ queryKey: [api.players.list.path] });
       setIsCreateOpen(false);
       toast({ title: "Sucesso", description: "Jogador adicionado com sucesso" });
-    }
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro ao adicionar jogador",
+        description: getApiErrorMessage(error, "Não foi possível adicionar o jogador."),
+        variant: "destructive",
+      });
+    },
   });
 
   const updateMutation = useMutation({
@@ -235,7 +242,14 @@ export default function Players() {
       queryClient.invalidateQueries({ queryKey: [api.players.list.path] });
       setEditingPlayer(null);
       toast({ title: "Sucesso", description: "Jogador atualizado com sucesso" });
-    }
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro ao atualizar jogador",
+        description: getApiErrorMessage(error, "Não foi possível atualizar o jogador."),
+        variant: "destructive",
+      });
+    },
   });
 
   const deleteMutation = useMutation({
@@ -719,7 +733,12 @@ export default function Players() {
               <DialogHeader>
                 <DialogTitle>Adicionar Jogador</DialogTitle>
               </DialogHeader>
-              {isCreateOpen && <PlayerForm onSubmit={(data) => createMutation.mutate(data)} />}
+              {isCreateOpen && (
+                <PlayerForm
+                  isSubmitting={createMutation.isPending}
+                  onSubmit={(data) => createMutation.mutateAsync(data)}
+                />
+              )}
             </DialogContent>
           </Dialog>
         </div>
@@ -873,7 +892,8 @@ export default function Players() {
           {editingPlayer && (
             <PlayerForm 
               defaultValues={editingPlayer} 
-              onSubmit={(data) => updateMutation.mutate({ id: editingPlayer.id, data })} 
+              isSubmitting={updateMutation.isPending}
+              onSubmit={(data) => updateMutation.mutateAsync({ id: editingPlayer.id, data })}
             />
           )}
         </DialogContent>

@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AUTH_RESTORED_EVENT, apiRequest, isUnauthorizedError, queryClient } from "@/lib/queryClient";
+import { AUTH_RESTORED_EVENT, apiRequest, getApiErrorMessage, isUnauthorizedError, queryClient } from "@/lib/queryClient";
 import { fetchAllPlayers, type PlayersPageResponse } from "@/lib/players";
 import { PlayerForm } from "@/components/player-form";
 import { useToast } from "@/hooks/use-toast";
@@ -352,7 +352,7 @@ export default function Nonstop() {
     onError: (error: any) => {
       toast({
         title: "Erro",
-        description: error?.message || "Não foi possível criar o jogador.",
+        description: getApiErrorMessage(error, "Não foi possível criar o jogador."),
         variant: "destructive",
       });
     },

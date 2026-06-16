@@ -7,6 +7,22 @@ export function isUnauthorizedError(error: unknown) {
   return error instanceof Error && /^401:/.test(error.message);
 }
 
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) return fallback;
+
+  const message = error.message.replace(/^\d+:\s*/, "").trim();
+  if (!message) return fallback;
+
+  try {
+    const parsed = JSON.parse(message);
+    if (parsed && typeof parsed.message === "string" && parsed.message.trim()) {
+      return parsed.message;
+    }
+  } catch {}
+
+  return message;
+}
+
 function notifyAuthExpired() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));

@@ -28,6 +28,7 @@ const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 10;
 const loginRateLimitState = new Map<string, { count: number; windowStartedAt: number }>();
+const pendingPlayerCreateKeys = new Set<string>();
 
 // Custom authentication middleware
 const isAuthenticated: RequestHandler = (req, res, next) => {
@@ -98,6 +99,47 @@ function normalizeCategoryName(value: unknown): string | undefined {
   if (!cleaned) return undefined;
   if (cleaned.length <= 60) return cleaned;
   return cleaned.slice(0, 60).trim() || undefined;
+}
+
+function normalizePlayerName(value: unknown): string {
+  return typeof value === "string"
+    ? value.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-PT")
+    : "";
+}
+
+function normalizePlayerPhone(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\D/g, "") : "";
+}
+
+function getPlayerCreateKeys(player: { name?: unknown; phone?: unknown }): string[] {
+  const keys: string[] = [];
+  const name = normalizePlayerName(player.name);
+  const phone = normalizePlayerPhone(player.phone);
+  if (name) keys.push(`name:${name}`);
+  if (phone) keys.push(`phone:${phone}`);
+  return keys;
+}
+
+function findDuplicatePlayer(
+  players: Array<{ id: number; name: string; phone: string }>,
+  player: { name?: unknown; phone?: unknown },
+  excludePlayerId?: number,
+  checks: { name?: boolean; phone?: boolean } = { name: true, phone: true },
+): { message: string } | null {
+  const name = normalizePlayerName(player.name);
+  const phone = normalizePlayerPhone(player.phone);
+
+  for (const existing of players) {
+    if (excludePlayerId && existing.id === excludePlayerId) continue;
+    if (checks.name !== false && name && normalizePlayerName(existing.name) === name) {
+      return { message: "Já existe um jogador com esse nome." };
+    }
+    if (checks.phone !== false && phone && normalizePlayerPhone(existing.phone) === phone) {
+      return { message: "Já existe um jogador com esse telemóvel." };
+    }
+  }
+
+  return null;
 }
 
 function getSessionUserEmail(req: Request): string | null {
@@ -521,8 +563,24 @@ export async function registerRoutes(
   app.post(api.players.create.path, isAuthenticated, async (req, res) => {
     try {
       const input = api.players.create.input.parse(req.body);
-      const player = await storage.createPlayer(input);
-      res.status(201).json(player);
+      const createKeys = getPlayerCreateKeys(input);
+      if (createKeys.some((key) => pendingPlayerCreateKeys.has(key))) {
+        return res.status(409).json({ message: "Esse jogador já está a ser criado. Aguarda uns segundos e tenta novamente." });
+      }
+
+      createKeys.forEach((key) => pendingPlayerCreateKeys.add(key));
+      try {
+        const existingPlayers = await storage.getPlayers();
+        const duplicate = findDuplicatePlayer(existingPlayers, input);
+        if (duplicate) {
+          return res.status(409).json({ message: duplicate.message });
+        }
+
+        const player = await storage.createPlayer(input);
+        return res.status(201).json(player);
+      } finally {
+        createKeys.forEach((key) => pendingPlayerCreateKeys.delete(key));
+      }
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({
@@ -538,8 +596,23 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       const input = api.players.update.input.parse(req.body);
+      const existingPlayers = await storage.getPlayers();
+      const currentPlayer = existingPlayers.find((player) => player.id === id);
+      if (!currentPlayer) return res.status(404).json({ message: "Jogador não encontrado" });
+
+      const checkName = input.name !== undefined
+        && normalizePlayerName(input.name) !== normalizePlayerName(currentPlayer.name);
+      const checkPhone = input.phone !== undefined
+        && normalizePlayerPhone(input.phone) !== normalizePlayerPhone(currentPlayer.phone);
+      const duplicate = findDuplicatePlayer(existingPlayers, input, id, {
+        name: checkName,
+        phone: checkPhone,
+      });
+      if (duplicate) {
+        return res.status(409).json({ message: duplicate.message });
+      }
+
       const player = await storage.updatePlayer(id, input);
-      if (!player) return res.status(404).json({ message: "Player not found" });
       res.json(player);
     } catch (err) {
       if (err instanceof z.ZodError) {

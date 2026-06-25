@@ -83,7 +83,8 @@ type NavigatorWithWakeLock = Navigator & {
 };
 const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
 const NONSTOP_MAX_WIN_POINTS_PER_EVENT = 15;
-const SOUND_DEDUPE_TTL_MS = 2 * 60 * 1000;
+const SOUND_DEDUPE_TTL_MS = 12 * 60 * 60 * 1000;
+const SOUND_STALE_BOUNDARY_MS = 45 * 1000;
 const SOUND_LOCK_PREFIX = "now-padel:nonstop:sound:";
 const NONSTOP_EVENT_POLL_MS = 30_000;
 const NONSTOP_LIVE_DATA_POLL_MS = 5_000;
@@ -145,6 +146,21 @@ function readStoredSoundLock(raw: string | null) {
     const at = Number(raw);
     return Number.isFinite(at) ? at : null;
   }
+}
+
+function getBoundaryAgeMs(phaseEndsAt: number | string | null | undefined, now = Date.now()) {
+  const phaseTime = typeof phaseEndsAt === "number"
+    ? phaseEndsAt
+    : phaseEndsAt
+      ? new Date(phaseEndsAt).getTime()
+      : 0;
+
+  if (!Number.isFinite(phaseTime) || phaseTime <= 0) return 0;
+  return now - phaseTime;
+}
+
+function isStaleSoundBoundary(phaseEndsAt: number | string | null | undefined, now = Date.now()) {
+  return getBoundaryAgeMs(phaseEndsAt, now) > SOUND_STALE_BOUNDARY_MS;
 }
 
 function normalizeTeamName(name: string) {
@@ -853,13 +869,14 @@ export default function Nonstop() {
     currentRound: number,
     phaseEndsAt: number | string | null | undefined,
   ) => {
+    const eventKey = editableEvent?.id ? `event:${editableEvent.id}` : "event:active";
     const phaseTime = typeof phaseEndsAt === "number"
       ? phaseEndsAt
       : phaseEndsAt
         ? new Date(phaseEndsAt).getTime()
         : 0;
     const phaseKey = Number.isFinite(phaseTime) ? Math.floor(phaseTime / 1000) : 0;
-    return `${state}:${currentRound}:${phaseKey}`;
+    return `${eventKey}:${state}:${currentRound}:${phaseKey}`;
   };
 
   const rememberBoundarySound = (boundaryId: string, at = Date.now()) => {
@@ -989,6 +1006,10 @@ export default function Nonstop() {
   }, []);
 
   const playSound = (type: TimerSound, dedupeKeyOverride?: string) => {
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+      return;
+    }
+
     const soundType = resolveSoundType(type);
     const now = Date.now();
     const dedupeKey = dedupeKeyOverride || `${type}:${timerState}:${round}`;
@@ -1245,6 +1266,10 @@ export default function Nonstop() {
       prevSnapshot.phaseEndsAt,
     );
     const now = Date.now();
+    if (isStaleSoundBoundary(prevSnapshot.phaseEndsAt, now)) {
+      rememberBoundarySound(previousBoundaryId, now);
+      return;
+    }
     if (hasRecentBoundarySound(previousBoundaryId, now)) {
       return;
     }
@@ -1262,6 +1287,7 @@ export default function Nonstop() {
     syncedTimer?.phaseEndsAt,
     readOnlyMode,
     totalRounds,
+    editableEvent?.id,
   ]);
 
   useEffect(() => {
@@ -1283,13 +1309,17 @@ export default function Nonstop() {
 
     const boundaryId = getBoundaryId(timerState, round, phaseEndAtRef.current);
     const now = Date.now();
+    if (isStaleSoundBoundary(phaseEndAtRef.current, now)) {
+      rememberBoundarySound(boundaryId, now);
+      return;
+    }
     if (hasRecentBoundarySound(boundaryId, now)) {
       return;
     }
     rememberBoundarySound(boundaryId, now);
 
     playSound(fallbackSound, `boundary:${fallbackSound}:${boundaryId}`);
-  }, [isActive, timeLeft, timerState, round, totalRounds, readOnlyMode, settings?.restTime]);
+  }, [isActive, timeLeft, timerState, round, totalRounds, readOnlyMode, settings?.restTime, editableEvent?.id]);
 
   useEffect(() => {
     if (readOnlyMode) {

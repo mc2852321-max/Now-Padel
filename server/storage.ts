@@ -32,6 +32,7 @@ import {
   serializeRankingSeasons,
   type RankingSeasonOption,
 } from "../shared/ranking-seasons.js";
+import { compareTiedNonstopStandings } from "../shared/nonstop-standings.js";
 import { db, hasDatabase } from "./db.js";
 import { eq, and, or, ilike, desc, count, sql, inArray } from "drizzle-orm";
 import { LocalStorage } from "./local-storage.js";
@@ -295,21 +296,7 @@ function computeStandings(
   return Object.values(standings).sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
 
-    if (tieBreaker === "direct") {
-      const directMatch = allResults.find((r) =>
-        (r.teamAId === a.teamId && r.teamBId === b.teamId) ||
-        (r.teamAId === b.teamId && r.teamBId === a.teamId),
-      );
-      if (directMatch && directMatch.scoreA !== null && directMatch.scoreB !== null) {
-        const aScore = directMatch.teamAId === a.teamId ? directMatch.scoreA : directMatch.scoreB;
-        const bScore = directMatch.teamAId === b.teamId ? directMatch.scoreA : directMatch.scoreB;
-        if (aScore !== bScore) return bScore - aScore;
-      }
-    }
-
-    const diffA = a.gamesWon - a.gamesLost;
-    const diffB = b.gamesWon - b.gamesLost;
-    return diffB - diffA;
+    return compareTiedNonstopStandings(a, b, allResults, tieBreaker === "direct");
   });
 }
 

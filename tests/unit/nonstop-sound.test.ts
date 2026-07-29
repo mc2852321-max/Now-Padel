@@ -11,8 +11,12 @@ describe("Non Stop sound ownership", () => {
     assert.equal(canPlayNonstopSound(true, "visible"), false);
   });
 
-  it("blocks sounds in hidden control tabs", () => {
-    assert.equal(canPlayNonstopSound(false, "hidden"), false);
+  it("allows sounds when the control page is minimized", () => {
+    assert.equal(canPlayNonstopSound(false, "hidden"), true);
+  });
+
+  it("blocks sounds when presentation mode is minimized", () => {
+    assert.equal(canPlayNonstopSound(true, "hidden"), false);
   });
 
   it("blocks sounds when no browser document is available", () => {

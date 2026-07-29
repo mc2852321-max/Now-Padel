@@ -28,7 +28,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { format } from "date-fns";
 import { AnimatePresence, motion } from "framer-motion";
 import { getRankingSeasonForDate, parseRankingSeasons } from "@shared/ranking-seasons";
-import { compareTiedNonstopStandings } from "@shared/nonstop-standings";
+import { sortNonstopStandings } from "@shared/nonstop-standings";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 type TimerSound = 'start-warmup' | 'start-game' | 'end-game' | 'final';
@@ -2286,11 +2286,7 @@ export default function Nonstop() {
       }
     });
 
-    return Object.values(standings).sort((a, b) => {
-      if (b.points !== a.points) return b.points - a.points;
-
-      return compareTiedNonstopStandings(a, b, results, true);
-    });
+    return sortNonstopStandings(Object.values(standings), results, true);
   };
 
   const stats = getStandings();

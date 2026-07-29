@@ -8,6 +8,7 @@
     "build": "tsx script/build.ts",
     "start": "node dist/index.cjs",
     "check": "tsc",
+    "test:unit": "tsx --test tests/unit/*.test.ts",
     "test:e2e:nonstop-session": "playwright test tests/e2e/nonstop-session.spec.ts --browser=chromium",
     "db:push": "drizzle-kit push"
   },

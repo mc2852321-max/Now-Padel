@@ -32,7 +32,7 @@ import {
   serializeRankingSeasons,
   type RankingSeasonOption,
 } from "../shared/ranking-seasons.js";
-import { compareTiedNonstopStandings } from "../shared/nonstop-standings.js";
+import { sortNonstopStandings } from "../shared/nonstop-standings.js";
 import { db, hasDatabase } from "./db.js";
 import { eq, and, or, ilike, desc, count, sql, inArray } from "drizzle-orm";
 import { LocalStorage } from "./local-storage.js";
@@ -293,11 +293,11 @@ function computeStandings(
     }
   });
 
-  return Object.values(standings).sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-
-    return compareTiedNonstopStandings(a, b, allResults, tieBreaker === "direct");
-  });
+  return sortNonstopStandings(
+    Object.values(standings),
+    allResults,
+    tieBreaker === "direct",
+  );
 }
 
 export class DatabaseStorage implements IStorage {

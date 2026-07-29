@@ -1609,10 +1609,13 @@ export default function Settings() {
                 <CardContent>
                   <div className="space-y-2 text-sm text-muted-foreground">
                     <p>
-                      Primeiro critério: <span className="font-medium text-foreground">Confronto direto</span>.
+                      Duas duplas empatadas: <span className="font-medium text-foreground">confronto direto</span>.
                     </p>
                     <p>
-                      Segundo critério: <span className="font-medium text-foreground">Diferença entre jogos ganhos e perdidos</span>.
+                      Três ou mais duplas empatadas: <span className="font-medium text-foreground">mini-classificação entre as duplas empatadas</span>, por vitórias, diferença de jogos e jogos ganhos.
+                    </p>
+                    <p>
+                      Se o empate continuar: <span className="font-medium text-foreground">diferença geral e total geral de jogos ganhos</span>.
                     </p>
                   </div>
                 </CardContent>

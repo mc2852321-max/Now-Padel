@@ -30,6 +30,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { getRankingSeasonForDate, parseRankingSeasons } from "@shared/ranking-seasons";
 import { sortNonstopStandings } from "@shared/nonstop-standings";
 import { findRepeatedTeamInRound } from "@shared/nonstop-schedule";
+import { canPlayNonstopSound } from "@shared/nonstop-sound";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 type TimerSound = 'start-warmup' | 'start-game' | 'end-game' | 'final';
@@ -1008,7 +1009,10 @@ export default function Nonstop() {
   }, []);
 
   const playSound = (type: TimerSound, dedupeKeyOverride?: string) => {
-    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+    const visibilityState = typeof document === "undefined"
+      ? "unavailable"
+      : document.visibilityState;
+    if (!canPlayNonstopSound(isPresentationMode, visibilityState)) {
       return;
     }
 
@@ -1141,18 +1145,7 @@ export default function Nonstop() {
       soundTimeoutsRef.current.push(timeoutId);
     };
 
-    if (!isPresentationMode) {
-      queuePlayback();
-      return;
-    }
-
-    // The control tab has priority. Presentation only sounds if no control tab claimed it.
-    const fallbackDelayMs = 700;
-    const timeoutId = setTimeout(() => {
-      queuePlayback();
-      soundTimeoutsRef.current = soundTimeoutsRef.current.filter((id) => id !== timeoutId);
-    }, fallbackDelayMs);
-    soundTimeoutsRef.current.push(timeoutId);
+    queuePlayback();
   };
 
   const clearScheduledSounds = () => {

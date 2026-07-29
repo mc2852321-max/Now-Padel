@@ -33,6 +33,7 @@ import {
   serializeRankingSeasons,
   type RankingSeasonOption,
 } from "../shared/ranking-seasons.js";
+import { findRepeatedTeamInRound } from "../shared/nonstop-schedule.js";
 
 const DEFAULT_NONSTOP_CATEGORY = "Non Stop";
 const RANKING_ALL_CATEGORIES_TOKEN = "__all__";
@@ -539,10 +540,24 @@ export class LocalStorage implements IStorage {
 
   async createOrUpdateResult(result: InsertNonstopResult): Promise<NonstopResult> {
     const eventId = result.eventId ?? this.event.id;
+    const round = result.round ?? 1;
+    const court = result.court ?? 1;
+    const repeatedTeamId = findRepeatedTeamInRound(
+      this.results.filter((row) => row.eventId === eventId),
+      {
+        round,
+        court,
+        teamAId: result.teamAId,
+        teamBId: result.teamBId,
+      },
+    );
+    if (repeatedTeamId !== null) {
+      throw new Error("RESULT_TEAM_ALREADY_IN_ROUND");
+    }
     const existingIndex = this.results.findIndex((row) =>
       row.eventId === eventId &&
-      row.round === result.round &&
-      row.court === result.court,
+      row.round === round &&
+      row.court === court,
     );
     const next: NonstopResult = {
       id: existingIndex >= 0 ? this.results[existingIndex].id : this.nextResultId++,
@@ -551,8 +566,8 @@ export class LocalStorage implements IStorage {
       teamBId: result.teamBId,
       scoreA: result.scoreA,
       scoreB: result.scoreB,
-      round: result.round ?? 1,
-      court: result.court ?? 1,
+      round,
+      court,
       playedAt: new Date(),
     };
 

@@ -900,6 +900,9 @@ export async function registerRoutes(
       if (err instanceof Error && err.message === "RESULT_TEAM_NOT_IN_EVENT") {
         return res.status(400).json({ message: "Uma das equipas selecionadas nao pertence ao evento atual." });
       }
+      if (err instanceof Error && err.message === "RESULT_TEAM_ALREADY_IN_ROUND") {
+        return res.status(400).json({ message: "Uma dupla nao pode jogar duas vezes na mesma ronda." });
+      }
       console.error("[results/create] error:", err);
       res.status(500).json({ message: "Internal server error" });
     }

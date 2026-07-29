@@ -33,6 +33,7 @@ import {
   type RankingSeasonOption,
 } from "../shared/ranking-seasons.js";
 import { sortNonstopStandings } from "../shared/nonstop-standings.js";
+import { findRepeatedTeamInRound } from "../shared/nonstop-schedule.js";
 import { db, hasDatabase } from "./db.js";
 import { eq, and, or, ilike, desc, count, sql, inArray } from "drizzle-orm";
 import { LocalStorage } from "./local-storage.js";
@@ -1019,6 +1020,27 @@ export class DatabaseStorage implements IStorage {
       insertResult.teamAId,
       insertResult.teamBId,
     );
+    const roundAssignments = await db
+      .select({
+        round: nonstopResults.round,
+        court: nonstopResults.court,
+        teamAId: nonstopResults.teamAId,
+        teamBId: nonstopResults.teamBId,
+      })
+      .from(nonstopResults)
+      .where(and(
+        eq(nonstopResults.eventId, active.id),
+        eq(nonstopResults.round, round),
+      ));
+    const repeatedTeamId = findRepeatedTeamInRound(roundAssignments, {
+      round,
+      court,
+      teamAId: insertResult.teamAId,
+      teamBId: insertResult.teamBId,
+    });
+    if (repeatedTeamId !== null) {
+      throw new Error("RESULT_TEAM_ALREADY_IN_ROUND");
+    }
 
     const [saved] = await db
       .insert(nonstopResults)

@@ -29,6 +29,7 @@ import { format } from "date-fns";
 import { AnimatePresence, motion } from "framer-motion";
 import { getRankingSeasonForDate, parseRankingSeasons } from "@shared/ranking-seasons";
 import { sortNonstopStandings } from "@shared/nonstop-standings";
+import { findRepeatedTeamInRound } from "@shared/nonstop-schedule";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 type TimerSound = 'start-warmup' | 'start-game' | 'end-game' | 'final';
@@ -1802,6 +1803,15 @@ export default function Nonstop() {
         toast({
           title: "Sessão expirada",
           description: "Resultado mantido neste dispositivo. Inicia sessão para gravar.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Alteração inválida",
+          description: getApiErrorMessage(
+            _err,
+            "Não foi possível alterar as duplas desta partida.",
+          ),
           variant: "destructive",
         });
       }
@@ -4080,7 +4090,20 @@ export default function Nonstop() {
                               </SelectTrigger>
                               <SelectContent>
                                 {teams?.map((t) => (
-                                  <SelectItem className="font-np-body" key={t.id} value={t.id.toString()}>
+                                  <SelectItem
+                                    className="font-np-body"
+                                    key={t.id}
+                                    value={t.id.toString()}
+                                    disabled={
+                                      t.id === matchResult?.teamBId ||
+                                      findRepeatedTeamInRound(results ?? [], {
+                                        round: roundNum,
+                                        court: courtNum,
+                                        teamAId: t.id,
+                                        teamBId: matchResult?.teamBId ?? t.id,
+                                      }) !== null
+                                    }
+                                  >
                                     {getTeamOptionLabel(t)}
                                   </SelectItem>
                                 ))}
@@ -4133,7 +4156,20 @@ export default function Nonstop() {
                               </SelectTrigger>
                               <SelectContent>
                                 {teams?.map((t) => (
-                                  <SelectItem className="font-np-body" key={t.id} value={t.id.toString()}>
+                                  <SelectItem
+                                    className="font-np-body"
+                                    key={t.id}
+                                    value={t.id.toString()}
+                                    disabled={
+                                      t.id === matchResult?.teamAId ||
+                                      findRepeatedTeamInRound(results ?? [], {
+                                        round: roundNum,
+                                        court: courtNum,
+                                        teamAId: matchResult?.teamAId ?? t.id,
+                                        teamBId: t.id,
+                                      }) !== null
+                                    }
+                                  >
                                     {getTeamOptionLabel(t)}
                                   </SelectItem>
                                 ))}

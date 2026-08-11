@@ -190,6 +190,12 @@ function getPodiumTeamNameClass(name: string) {
   return "text-lg max-[900px]:text-sm";
 }
 
+function getClosingResultTeamNameClass(name: string) {
+  if (name.length > 42) return "text-[clamp(9px,1.05vh,12px)]";
+  if (name.length > 30) return "text-[clamp(10px,1.15vh,13px)]";
+  return "text-[clamp(11px,1.3vh,14px)]";
+}
+
 function toLisbonDayKey(dateLike: Date | string | null | undefined) {
   if (!dateLike) return "";
   const value = new Date(dateLike);
@@ -3153,35 +3159,35 @@ export default function Nonstop() {
       );
 
       return (
-        <div className="space-y-2">
+        <div className="flex h-[calc(100vh-100px)] min-h-[560px] flex-col gap-2 max-[900px]:h-[calc(100vh-62px)] max-[900px]:min-h-[500px]">
           <Card className="overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-xl">
-            <CardHeader className="bg-slate-900 px-2.5 py-1.5 text-white max-[900px]:py-0.5">
-              <CardTitle className="font-np-head text-center text-sm uppercase tracking-widest max-[900px]:text-[10px]">
+            <CardHeader className="flex h-[clamp(30px,4vh,46px)] justify-center bg-slate-900 px-3 py-0 text-white">
+              <CardTitle className="font-np-head text-center text-[clamp(12px,1.55vh,17px)] uppercase tracking-widest">
                 Classificação Geral
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
                 <TableHeader className="font-np-head bg-orange-600 text-white">
-                  <TableRow className="h-5 hover:bg-orange-600">
-                    <TableHead className="h-5 min-w-[200px] px-1.5 py-0 text-[9px] font-bold uppercase leading-none text-white">Duplas</TableHead>
+                  <TableRow className="h-[clamp(24px,2.8vh,32px)] hover:bg-orange-600">
+                    <TableHead className="h-[clamp(24px,2.8vh,32px)] min-w-[200px] px-2 py-0 text-[clamp(10px,1.15vh,13px)] font-bold uppercase leading-none text-white">Duplas</TableHead>
                     {Array.from({ length: displayNumRounds }).map((_, i) => (
-                      <TableHead key={`closing-simple-round-${i}`} className="h-5 min-w-[56px] border-l border-orange-500 py-0 text-center text-[9px] font-bold leading-none text-white">
+                      <TableHead key={`closing-simple-round-${i}`} className="h-[clamp(24px,2.8vh,32px)] min-w-[56px] border-l border-orange-500 py-0 text-center text-[clamp(9px,1.1vh,12px)] font-bold leading-none text-white">
                         Ronda {i + 1}
                       </TableHead>
                     ))}
-                    <TableHead className="h-5 border-l border-orange-500 py-0 text-center text-[9px] font-bold leading-none text-white">JG</TableHead>
-                    <TableHead className="h-5 border-l border-orange-500 py-0 text-center text-[9px] font-bold leading-none text-white">JP</TableHead>
-                    <TableHead className="h-5 border-l border-orange-500 py-0 text-center text-[9px] font-bold leading-none text-white">DIF.</TableHead>
-                    <TableHead className="h-5 w-14 border-l border-orange-500 py-0 text-center text-[9px] font-bold leading-none text-white">Pontos</TableHead>
+                    <TableHead className="border-l border-orange-500 py-0 text-center text-[clamp(9px,1.1vh,12px)] font-bold leading-none text-white">JG</TableHead>
+                    <TableHead className="border-l border-orange-500 py-0 text-center text-[clamp(9px,1.1vh,12px)] font-bold leading-none text-white">JP</TableHead>
+                    <TableHead className="border-l border-orange-500 py-0 text-center text-[clamp(9px,1.1vh,12px)] font-bold leading-none text-white">DIF.</TableHead>
+                    <TableHead className="w-14 border-l border-orange-500 py-0 text-center text-[clamp(9px,1.1vh,12px)] font-bold leading-none text-white">Pontos</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody className="font-np-body">
                   {stats.map((team: any, index: number) => (
-                    <TableRow key={`closing-simple-standing-${team.teamId}`} className={cn("h-5 hover:bg-slate-50", index === 0 && "bg-orange-50")}>
-                      <TableCell className="px-1.5 py-0 text-[9px] font-medium leading-tight">
+                    <TableRow key={`closing-simple-standing-${team.teamId}`} className={cn("h-[clamp(24px,2.8vh,32px)] hover:bg-slate-50", index === 0 && "bg-orange-50")}>
+                      <TableCell className="px-2 py-0 text-[clamp(10px,1.2vh,14px)] font-medium leading-tight">
                         <div className="flex items-center gap-1.5">
-                          {index === 0 ? <Trophy className="h-3.5 w-3.5 shrink-0 text-orange-600" /> : null}
+                          {index === 0 ? <Trophy className="h-[clamp(14px,1.7vh,19px)] w-[clamp(14px,1.7vh,19px)] shrink-0 text-orange-600" /> : null}
                           <span className="break-words">{normalizeTeamName(team.name)}</span>
                         </div>
                       </TableCell>
@@ -3189,7 +3195,7 @@ export default function Nonstop() {
                         <TableCell
                           key={`closing-simple-standing-${team.teamId}-${i}`}
                           className={cn(
-                            "font-np-head w-14 border-l py-0 text-center text-[9px] font-bold",
+                            "font-np-head w-14 border-l py-0 text-center text-[clamp(10px,1.2vh,13px)] font-bold",
                             char === "V" ? "bg-green-100 text-green-700" :
                             char === "D" ? "bg-red-100 text-red-700" :
                             char === "E" ? "bg-yellow-100 text-yellow-700" : "",
@@ -3198,10 +3204,10 @@ export default function Nonstop() {
                           {char}
                         </TableCell>
                       ))}
-                      <TableCell className="font-np-num w-11 border-l py-0 text-center text-[9px]">{team.gamesWon}</TableCell>
-                      <TableCell className="font-np-num w-11 border-l py-0 text-center text-[9px]">{team.gamesLost}</TableCell>
-                      <TableCell className="font-np-num w-11 border-l py-0 text-center text-[9px]">{team.gamesWon - team.gamesLost}</TableCell>
-                      <TableCell className="font-np-num w-14 border-l bg-slate-50 py-0 text-center text-[9px] font-bold">{formatPoints(team.points)}</TableCell>
+                      <TableCell className="font-np-num w-11 border-l py-0 text-center text-[clamp(10px,1.2vh,13px)]">{team.gamesWon}</TableCell>
+                      <TableCell className="font-np-num w-11 border-l py-0 text-center text-[clamp(10px,1.2vh,13px)]">{team.gamesLost}</TableCell>
+                      <TableCell className="font-np-num w-11 border-l py-0 text-center text-[clamp(10px,1.2vh,13px)]">{team.gamesWon - team.gamesLost}</TableCell>
+                      <TableCell className="font-np-num w-14 border-l bg-slate-50 py-0 text-center text-[clamp(10px,1.2vh,13px)] font-bold">{formatPoints(team.points)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -3210,7 +3216,7 @@ export default function Nonstop() {
           </Card>
 
           <div
-            className="grid grid-cols-1 gap-1 lg:grid-cols-2"
+            className="grid min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-2 min-[800px]:grid-cols-2"
             data-testid="closing-presentation-rounds-grid"
           >
             {Array.from({ length: displayNumRounds }).map((_, roundIndex) => {
@@ -3224,24 +3230,24 @@ export default function Nonstop() {
                   key={`closing-simple-results-round-${roundNum}`}
                   className={cn(
                     "min-w-0",
-                    shouldCenterRound && "lg:col-span-2 lg:w-1/2 lg:justify-self-center",
+                    shouldCenterRound && "min-[800px]:col-span-2 min-[800px]:w-1/2 min-[800px]:justify-self-center",
                   )}
                   data-testid={`closing-presentation-round-${roundNum}`}
                 >
-                <Card className="h-full overflow-hidden border-2 border-orange-600">
-                  <CardHeader className="bg-orange-600 py-0.5 text-center text-white">
-                    <CardTitle className="font-np-head text-[9px] uppercase tracking-widest">Ronda {roundNum}</CardTitle>
+                <Card className="flex h-full min-h-0 flex-col overflow-hidden border-2 border-orange-600">
+                  <CardHeader className="flex h-[clamp(26px,3.3vh,38px)] shrink-0 justify-center bg-orange-600 py-0 text-center text-white">
+                    <CardTitle className="font-np-head text-[clamp(11px,1.35vh,15px)] uppercase tracking-widest">Ronda {roundNum}</CardTitle>
                   </CardHeader>
-                  <CardContent className="p-0">
-                    <Table>
+                  <CardContent className="min-h-0 flex-1 p-0">
+                    <Table className="h-full table-fixed">
                       <TableHeader className="font-np-head bg-slate-100">
-                        <TableRow className="h-5 hover:bg-slate-100">
-                          <TableHead className="h-5 w-9 px-1 py-0 text-center text-[9px] font-bold leading-none">CAMPO</TableHead>
-                          <TableHead className="h-5 w-[34%] px-1 py-0 text-[9px] font-bold leading-none">EQUIPA A</TableHead>
-                          <TableHead className="h-5 w-10 px-1 py-0 text-center text-[9px] font-bold leading-none">RES</TableHead>
-                          <TableHead className="h-5 w-6 py-0 text-center text-[9px] font-normal leading-none text-muted-foreground">vs</TableHead>
-                          <TableHead className="h-5 w-10 px-1 py-0 text-center text-[9px] font-bold leading-none">RES</TableHead>
-                          <TableHead className="h-5 w-[34%] px-1 py-0 text-[9px] font-bold leading-none">EQUIPA B</TableHead>
+                        <TableRow className="h-[clamp(25px,3vh,34px)] hover:bg-slate-100">
+                          <TableHead className="h-[clamp(25px,3vh,34px)] w-[52px] px-1 py-0 text-center text-[clamp(9px,1.05vh,12px)] font-bold leading-none">CAMPO</TableHead>
+                          <TableHead className="h-[clamp(25px,3vh,34px)] w-[34%] px-2 py-0 text-[clamp(9px,1.05vh,12px)] font-bold leading-none">EQUIPA A</TableHead>
+                          <TableHead className="h-[clamp(25px,3vh,34px)] w-12 px-1 py-0 text-center text-[clamp(9px,1.05vh,12px)] font-bold leading-none">RES</TableHead>
+                          <TableHead className="h-[clamp(25px,3vh,34px)] w-8 py-0 text-center text-[clamp(9px,1.05vh,12px)] font-normal leading-none text-muted-foreground">vs</TableHead>
+                          <TableHead className="h-[clamp(25px,3vh,34px)] w-12 px-1 py-0 text-center text-[clamp(9px,1.05vh,12px)] font-bold leading-none">RES</TableHead>
+                          <TableHead className="h-[clamp(25px,3vh,34px)] w-[34%] px-2 py-0 text-[clamp(9px,1.05vh,12px)] font-bold leading-none">EQUIPA B</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody className="font-np-body">
@@ -3257,18 +3263,18 @@ export default function Nonstop() {
                           const isTeamBWinner = Boolean(hasPlayed && scoreB! > scoreA!);
 
                           return (
-                            <TableRow key={`closing-simple-results-${roundNum}-${courtNum}`} className="h-5">
-                              <TableCell className="font-np-num border-r bg-slate-50 px-1 py-0.5 text-center text-[10px] font-bold">{courtNum}</TableCell>
-                              <TableCell className={cn("max-w-0 px-1 py-0.5 leading-tight", isTeamAWinner && "font-bold text-green-700")}>
-                                <span className={cn("line-clamp-2 whitespace-normal break-words", getPresentationTeamNameClass(teamA ? getTeamOptionLabel(teamA) : "-"))}>
+                            <TableRow key={`closing-simple-results-${roundNum}-${courtNum}`} className="h-[clamp(30px,3.8vh,44px)]">
+                              <TableCell className="font-np-num border-r bg-slate-50 px-1 py-0 text-center text-[clamp(12px,1.55vh,17px)] font-bold">{courtNum}</TableCell>
+                              <TableCell className={cn("max-w-0 px-2 py-0 leading-tight", isTeamAWinner && "font-bold text-green-700")}>
+                                <span className={cn("line-clamp-2 whitespace-normal break-words", getClosingResultTeamNameClass(teamA ? getTeamOptionLabel(teamA) : "-"))}>
                                   {teamA ? getTeamOptionLabel(teamA) : "-"}
                                 </span>
                               </TableCell>
-                              <TableCell className="font-np-num px-1 py-0.5 text-center text-[10px] font-bold">{scoreA ?? "-"}</TableCell>
-                              <TableCell className="font-np-head border-x bg-slate-50 py-0.5 text-center text-[9px] text-muted-foreground">vs</TableCell>
-                              <TableCell className="font-np-num px-1 py-0.5 text-center text-[10px] font-bold">{scoreB ?? "-"}</TableCell>
-                              <TableCell className={cn("max-w-0 px-1 py-0.5 leading-tight", isTeamBWinner && "font-bold text-green-700")}>
-                                <span className={cn("line-clamp-2 whitespace-normal break-words", getPresentationTeamNameClass(teamB ? getTeamOptionLabel(teamB) : "-"))}>
+                              <TableCell className="font-np-num px-1 py-0 text-center text-[clamp(13px,1.7vh,19px)] font-bold">{scoreA ?? "-"}</TableCell>
+                              <TableCell className="font-np-head border-x bg-slate-50 py-0 text-center text-[clamp(9px,1.1vh,12px)] text-muted-foreground">vs</TableCell>
+                              <TableCell className="font-np-num px-1 py-0 text-center text-[clamp(13px,1.7vh,19px)] font-bold">{scoreB ?? "-"}</TableCell>
+                              <TableCell className={cn("max-w-0 px-2 py-0 leading-tight", isTeamBWinner && "font-bold text-green-700")}>
+                                <span className={cn("line-clamp-2 whitespace-normal break-words", getClosingResultTeamNameClass(teamB ? getTeamOptionLabel(teamB) : "-"))}>
                                   {teamB ? getTeamOptionLabel(teamB) : "-"}
                                 </span>
                               </TableCell>

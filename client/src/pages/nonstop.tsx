@@ -178,6 +178,18 @@ function getPresentationTeamNameClass(name: string) {
   return "text-[10px]";
 }
 
+function getChampionNameClass(name: string) {
+  if (name.length > 52) return "text-4xl max-[1400px]:text-3xl max-[900px]:text-2xl";
+  if (name.length > 38) return "text-5xl max-[1400px]:text-4xl max-[1200px]:text-3xl max-[900px]:text-2xl";
+  return "text-6xl max-[1400px]:text-5xl max-[1200px]:text-4xl max-[900px]:text-3xl";
+}
+
+function getPodiumTeamNameClass(name: string) {
+  if (name.length > 42) return "text-sm max-[900px]:text-[11px]";
+  if (name.length > 30) return "text-base max-[900px]:text-xs";
+  return "text-lg max-[900px]:text-sm";
+}
+
 function toLisbonDayKey(dateLike: Date | string | null | undefined) {
   if (!dateLike) return "";
   const value = new Date(dateLike);
@@ -2931,6 +2943,7 @@ export default function Nonstop() {
       const champion = closingPodium[0];
       const runnerUp = closingPodium[1];
       const thirdPlace = closingPodium[2];
+      const championName = champion ? normalizeTeamName(champion.name) : "Campeões por definir";
       const confettiColors = ["#f97316", "#ffffff", "#fb923c", "#111827", "#fdba74"];
 
       return (
@@ -2977,6 +2990,9 @@ export default function Nonstop() {
           </style>
           <div className="pointer-events-none absolute -left-28 top-1/2 h-[420px] w-[420px] -translate-y-1/2 rounded-full bg-orange-600/20 blur-3xl" />
           <div className="pointer-events-none absolute -right-24 top-12 h-80 w-80 rounded-full bg-white/5 blur-3xl" />
+          <div className="pointer-events-none absolute bottom-5 right-6 z-0 font-np-head text-xl font-black uppercase tracking-[0.32em] text-white/[0.055] max-[900px]:bottom-3 max-[900px]:right-3 max-[900px]:text-xs">
+            {settings?.clubName || "Now Padel & Fit"}
+          </div>
           <div
             className="pointer-events-none absolute inset-y-0 left-0 z-0 w-1/2 bg-gradient-to-r from-transparent via-orange-300/10 to-transparent"
             style={{ animation: "np-celebration-sweep 4.8s ease-in-out infinite" }}
@@ -3052,10 +3068,13 @@ export default function Nonstop() {
                   initial={{ opacity: 0, y: 22, scale: 0.985 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.78, delay: 0.28, ease: [0.22, 1, 0.36, 1] }}
-                  className="max-w-[980px] break-words text-6xl font-black leading-[0.95] text-white [text-wrap:balance] max-[1400px]:text-5xl max-[1200px]:text-4xl max-[900px]:text-3xl"
+                  className={cn(
+                    "max-w-[980px] break-words font-black leading-[0.95] text-white [text-wrap:balance]",
+                    getChampionNameClass(championName),
+                  )}
                   style={{ animation: "np-title-breathe 3.4s ease-in-out infinite" }}
                 >
-                  {champion ? normalizeTeamName(champion.name) : "Campeões por definir"}
+                  {championName}
                 </motion.h3>
                 <p className="hidden">
                   {playedResults.length} jogos disputados · {stats.length} duplas
@@ -3069,7 +3088,7 @@ export default function Nonstop() {
                 <div className="grid grid-cols-3 gap-2 max-[900px]:gap-1.5">
                   {[
                     { label: "Pontos", value: formatPoints(champion.points) },
-                    { label: "JG", value: champion.gamesWon },
+                    { label: "Jogos ganhos", value: champion.gamesWon },
                     {
                       label: "Dif.",
                       value: `${champion.gamesWon - champion.gamesLost > 0 ? "+" : ""}${champion.gamesWon - champion.gamesLost}`,
@@ -3103,16 +3122,19 @@ export default function Nonstop() {
                     initial={{ opacity: 0, y: 16 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5, delay: 0.74 + index * 0.1 }}
-                    className="flex min-w-0 items-center gap-3 rounded-md border border-white/10 bg-white/[0.06] p-3 shadow-lg max-[900px]:gap-2 max-[900px]:p-2"
+                    className="flex min-h-[82px] min-w-0 items-center gap-4 rounded-md border border-white/10 bg-white/[0.07] p-4 shadow-lg max-[900px]:min-h-[62px] max-[900px]:gap-2.5 max-[900px]:p-2.5"
                   >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-orange-500/15 text-orange-200 max-[900px]:h-8 max-[900px]:w-8">
-                      <Medal className="h-5 w-5 max-[900px]:h-4 max-[900px]:w-4" />
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-orange-300/10 bg-orange-500/15 text-orange-200 max-[900px]:h-9 max-[900px]:w-9">
+                      <Medal className="h-6 w-6 max-[900px]:h-[18px] max-[900px]:w-[18px]" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-orange-200">
+                      <p className="text-[11px] font-black uppercase tracking-widest text-orange-200 max-[900px]:text-[9px]">
                         {index === 0 ? "2.º lugar" : "3.º lugar"}
                       </p>
-                      <p className="mt-1 truncate text-sm font-bold text-white max-[900px]:text-xs">
+                      <p className={cn(
+                        "mt-1 line-clamp-2 whitespace-normal break-words font-bold leading-tight text-white",
+                        getPodiumTeamNameClass(team ? normalizeTeamName(team.name) : "-"),
+                      )}>
                         {team ? normalizeTeamName(team.name) : "-"}
                       </p>
                     </div>

@@ -3187,11 +3187,26 @@ export default function Nonstop() {
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-1 gap-1 lg:grid-cols-2 xl:grid-cols-3">
+          <div
+            className="grid grid-cols-1 gap-1 lg:grid-cols-2"
+            data-testid="closing-presentation-rounds-grid"
+          >
             {Array.from({ length: displayNumRounds }).map((_, roundIndex) => {
               const roundNum = roundIndex + 1;
+              const shouldCenterRound = shouldCenterPresentationRound(
+                displayNumRounds,
+                roundIndex,
+              );
               return (
-                <Card key={`closing-simple-results-round-${roundNum}`} className="overflow-hidden border-2 border-orange-600">
+                <div
+                  key={`closing-simple-results-round-${roundNum}`}
+                  className={cn(
+                    "min-w-0",
+                    shouldCenterRound && "lg:col-span-2 lg:w-1/2 lg:justify-self-center",
+                  )}
+                  data-testid={`closing-presentation-round-${roundNum}`}
+                >
+                <Card className="h-full overflow-hidden border-2 border-orange-600">
                   <CardHeader className="bg-orange-600 py-0.5 text-center text-white">
                     <CardTitle className="font-np-head text-[9px] uppercase tracking-widest">Ronda {roundNum}</CardTitle>
                   </CardHeader>
@@ -3222,14 +3237,18 @@ export default function Nonstop() {
                           return (
                             <TableRow key={`closing-simple-results-${roundNum}-${courtNum}`} className="h-5">
                               <TableCell className="font-np-num border-r bg-slate-50 px-1 py-0.5 text-center text-[10px] font-bold">{courtNum}</TableCell>
-                              <TableCell className={cn("max-w-0 px-1 py-0.5 text-[9px] leading-tight", isTeamAWinner && "font-bold text-green-700")}>
-                                <span className="block truncate">{teamA ? getTeamOptionLabel(teamA) : "-"}</span>
+                              <TableCell className={cn("max-w-0 px-1 py-0.5 leading-tight", isTeamAWinner && "font-bold text-green-700")}>
+                                <span className={cn("line-clamp-2 whitespace-normal break-words", getPresentationTeamNameClass(teamA ? getTeamOptionLabel(teamA) : "-"))}>
+                                  {teamA ? getTeamOptionLabel(teamA) : "-"}
+                                </span>
                               </TableCell>
                               <TableCell className="font-np-num px-1 py-0.5 text-center text-[10px] font-bold">{scoreA ?? "-"}</TableCell>
                               <TableCell className="font-np-head border-x bg-slate-50 py-0.5 text-center text-[9px] text-muted-foreground">vs</TableCell>
                               <TableCell className="font-np-num px-1 py-0.5 text-center text-[10px] font-bold">{scoreB ?? "-"}</TableCell>
-                              <TableCell className={cn("max-w-0 px-1 py-0.5 text-[9px] leading-tight", isTeamBWinner && "font-bold text-green-700")}>
-                                <span className="block truncate">{teamB ? getTeamOptionLabel(teamB) : "-"}</span>
+                              <TableCell className={cn("max-w-0 px-1 py-0.5 leading-tight", isTeamBWinner && "font-bold text-green-700")}>
+                                <span className={cn("line-clamp-2 whitespace-normal break-words", getPresentationTeamNameClass(teamB ? getTeamOptionLabel(teamB) : "-"))}>
+                                  {teamB ? getTeamOptionLabel(teamB) : "-"}
+                                </span>
                               </TableCell>
                             </TableRow>
                           );
@@ -3238,6 +3257,7 @@ export default function Nonstop() {
                     </Table>
                   </CardContent>
                 </Card>
+                </div>
               );
             })}
           </div>

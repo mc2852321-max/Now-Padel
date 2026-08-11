@@ -3238,7 +3238,7 @@ export default function Nonstop() {
                   <CardHeader className="flex h-[clamp(26px,3.3vh,38px)] shrink-0 justify-center bg-orange-600 py-0 text-center text-white">
                     <CardTitle className="font-np-head text-[clamp(11px,1.35vh,15px)] uppercase tracking-widest">Ronda {roundNum}</CardTitle>
                   </CardHeader>
-                  <CardContent className="min-h-0 flex-1 p-0">
+                  <CardContent className="min-h-0 flex-1 p-0 [&>div]:h-full">
                     <Table className="h-full table-fixed">
                       <TableHeader className="font-np-head bg-slate-100">
                         <TableRow className="h-[clamp(25px,3vh,34px)] hover:bg-slate-100">

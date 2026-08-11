@@ -12,7 +12,7 @@ import { AUTH_RESTORED_EVENT, apiRequest, getApiErrorMessage, isUnauthorizedErro
 import { fetchAllPlayers, type PlayersPageResponse } from "@/lib/players";
 import { PlayerForm } from "@/components/player-form";
 import { useToast } from "@/hooks/use-toast";
-import { ListOrdered, Medal, Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, History, Save, Trophy } from "lucide-react";
+import { ChevronLeft, ChevronRight, ListOrdered, Medal, Plus, Settings as SettingsIcon, Trash2, Square, Play, Pause, Download, Edit2, Maximize2, Minimize2, History, Save, Trophy } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Link } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -31,6 +31,7 @@ import { getRankingSeasonForDate, parseRankingSeasons } from "@shared/ranking-se
 import { sortNonstopStandings } from "@shared/nonstop-standings";
 import { findRepeatedTeamInRound } from "@shared/nonstop-schedule";
 import { canPlayNonstopSound } from "@shared/nonstop-sound";
+import { buildPresentationRoundPages, presentationNeedsPagination, shouldCenterPresentationRound } from "@shared/nonstop-presentation";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 type TimerSound = 'start-warmup' | 'start-game' | 'end-game' | 'final';
@@ -98,6 +99,7 @@ const SCORE_DRAFTS_STORAGE_KEY = "now-padel:nonstop:score-drafts";
 const NONSTOP_FINALIZED_STORAGE_KEY = "now-padel:nonstop:last-finalized-event";
 const CLOSING_PRESENTATION_TABS = ["Campeões", "Non Stop"];
 const CLOSING_PRESENTATION_TAB_MS = 12_000;
+const ROUND_PRESENTATION_PAGE_MS = 10_000;
 const CLOSING_PRESENTATION_RANKING_LIMIT = 10;
 
 const formatPoints = (value: number) => (
@@ -170,6 +172,12 @@ function normalizeTeamName(name: string) {
   return name.replace(/\s+/g, " ").trim();
 }
 
+function getPresentationTeamNameClass(name: string) {
+  if (name.length > 36) return "text-[8px]";
+  if (name.length > 26) return "text-[9px]";
+  return "text-[10px]";
+}
+
 function toLisbonDayKey(dateLike: Date | string | null | undefined) {
   if (!dateLike) return "";
   const value = new Date(dateLike);
@@ -222,6 +230,10 @@ export default function Nonstop() {
   const [closingPresentationSlide, setClosingPresentationSlide] = useState(0);
   const [dismissedClosingEventId, setDismissedClosingEventId] = useState<number | null>(null);
   const [presentationFinalizedEventId, setPresentationFinalizedEventId] = useState<number | null>(null);
+  const [presentationRoundsPaginated, setPresentationRoundsPaginated] = useState(false);
+  const [presentationRoundsPerPage, setPresentationRoundsPerPage] = useState(2);
+  const [presentationRoundPage, setPresentationRoundPage] = useState(0);
+  const [isPresentationRoundRotationPaused, setIsPresentationRoundRotationPaused] = useState(false);
   const liveDataPollMs = isPresentationMode && isClosingPresentationActive
     ? CLOSING_PRESENTATION_TAB_MS
     : NONSTOP_LIVE_DATA_POLL_MS;
@@ -444,7 +456,6 @@ export default function Nonstop() {
   const [isTeamDialogOpen, setIsTeamDialogOpen] = useState(false);
   const [isManageTeamsOpen, setIsManageTeamsOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
-  const [isDesktopPresentationViewport, setIsDesktopPresentationViewport] = useState(false);
   const [confirmStopPresentation, setConfirmStopPresentation] = useState(false);
   const phaseEndAtRef = useRef<number | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
@@ -493,6 +504,16 @@ export default function Nonstop() {
   const displayNumCourts = isSelectedHistoryMode && hasLoadedResults
     ? Math.max(1, historyNumCourts || Math.ceil((teams?.length ?? 0) / 2) || 1)
     : numCourts;
+  const presentationRoundPages = useMemo(
+    () => buildPresentationRoundPages(displayNumRounds, presentationRoundsPerPage),
+    [displayNumRounds, presentationRoundsPerPage],
+  );
+  const visibleRoundNumbers = isPresentationMode && presentationRoundsPaginated
+    ? (presentationRoundPages[presentationRoundPage] ?? presentationRoundPages[0] ?? [])
+    : Array.from({ length: displayNumRounds }, (_, index) => index + 1);
+  const presentationTeamNamesKey = (teams ?? [])
+    .map((team) => `${team.id}:${team.name}`)
+    .join("|");
   const getEventsByDate = (date?: Date) => {
     if (!date) return [];
     const dayKey = toLisbonDayKey(date);
@@ -788,22 +809,6 @@ export default function Nonstop() {
       void releaseWakeLock();
     };
   }, [isPresentationMode]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mediaQuery = window.matchMedia("(min-width: 1024px) and (pointer: fine)");
-    const updateViewportType = () => setIsDesktopPresentationViewport(mediaQuery.matches);
-
-    updateViewportType();
-
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", updateViewportType);
-      return () => mediaQuery.removeEventListener("change", updateViewportType);
-    }
-
-    mediaQuery.addListener(updateViewportType);
-    return () => mediaQuery.removeListener(updateViewportType);
-  }, []);
 
   useEffect(() => {
     if (!syncedTimer) return;
@@ -2527,6 +2532,105 @@ export default function Nonstop() {
     return () => window.clearInterval(interval);
   }, [isClosingPresentationActive]);
 
+  useEffect(() => {
+    if (!isPresentationMode || isClosingPresentationActive) {
+      setPresentationRoundsPaginated(false);
+      setPresentationRoundsPerPage(2);
+      setPresentationRoundPage(0);
+      setIsPresentationRoundRotationPaused(false);
+      return;
+    }
+
+    let firstFrame = 0;
+    let secondFrame = 0;
+    let cancelled = false;
+
+    const measureFullPresentation = () => {
+      if (cancelled) return;
+      setPresentationRoundsPaginated(false);
+      setPresentationRoundsPerPage(2);
+      setPresentationRoundPage(0);
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      firstFrame = window.requestAnimationFrame(() => {
+        secondFrame = window.requestAnimationFrame(() => {
+          const container = presentationContainerRef.current;
+          if (!container || cancelled) return;
+          setPresentationRoundsPaginated(
+            presentationNeedsPagination(container.scrollHeight, container.clientHeight),
+          );
+        });
+      });
+    };
+
+    measureFullPresentation();
+    window.addEventListener("resize", measureFullPresentation);
+    document.fonts?.ready.then(measureFullPresentation).catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", measureFullPresentation);
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [
+    displayNumCourts,
+    displayNumRounds,
+    isClosingPresentationActive,
+    isPresentationMode,
+    presentationTeamNamesKey,
+  ]);
+
+  useEffect(() => {
+    if (!isPresentationMode || !presentationRoundsPaginated) return;
+
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const container = presentationContainerRef.current;
+        if (!container || presentationRoundsPerPage === 1) return;
+        if (presentationNeedsPagination(container.scrollHeight, container.clientHeight)) {
+          setPresentationRoundsPerPage(1);
+          setPresentationRoundPage(0);
+        }
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [isPresentationMode, presentationRoundsPaginated, presentationRoundsPerPage]);
+
+  useEffect(() => {
+    if (presentationRoundPage < presentationRoundPages.length) return;
+    setPresentationRoundPage(0);
+  }, [presentationRoundPage, presentationRoundPages.length]);
+
+  useEffect(() => {
+    if (
+      !isPresentationMode ||
+      !presentationRoundsPaginated ||
+      isPresentationRoundRotationPaused ||
+      presentationRoundPages.length <= 1
+    ) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setPresentationRoundPage((current) =>
+        (current + 1) % presentationRoundPages.length,
+      );
+    }, ROUND_PRESENTATION_PAGE_MS);
+
+    return () => window.clearInterval(interval);
+  }, [
+    isPresentationMode,
+    isPresentationRoundRotationPaused,
+    presentationRoundPages.length,
+    presentationRoundsPaginated,
+  ]);
+
   const daysWithEvents = events.map((event) => new Date(event.startedAt ?? event.createdAt));
   const showHistoryEmptyState = viewMode === "history" && !selectedHistoryEventId;
   const selectedHistoryEventDateLabel = selectedHistoryEvent
@@ -3262,11 +3366,6 @@ export default function Nonstop() {
   return (
     <div
       ref={presentationContainerRef}
-      style={
-        isPresentationMode && isDesktopPresentationViewport && !isClosingPresentationActive
-          ? ({ zoom: 1.25 } as any)
-          : undefined
-      }
       className={cn(
         "space-y-8 pb-10",
         isPresentationMode && "fixed inset-0 z-[80] bg-background overflow-auto p-1 space-y-1 pb-1 max-[900px]:p-0.5 max-[900px]:space-y-0.5 max-[900px]:pb-0.5"
@@ -3907,6 +4006,51 @@ export default function Nonstop() {
         </div>
       </div>
 
+      {isPresentationMode && presentationRoundsPaginated && !isClosingPresentationActive ? (
+        <div
+          className="fixed bottom-3 right-3 z-[110] flex items-center gap-1 rounded-full border border-slate-300 bg-white/95 p-1 shadow-lg backdrop-blur"
+          data-testid="presentation-round-pagination"
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-full"
+            onClick={() => setPresentationRoundPage((current) =>
+              (current - 1 + presentationRoundPages.length) % presentationRoundPages.length
+            )}
+            aria-label="Página anterior de rondas"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="min-w-10 text-center text-[10px] font-bold tabular-nums text-slate-700">
+            {presentationRoundPage + 1}/{presentationRoundPages.length}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-full"
+            onClick={() => setIsPresentationRoundRotationPaused((paused) => !paused)}
+            aria-label={isPresentationRoundRotationPaused ? "Retomar rotação" : "Pausar rotação"}
+          >
+            {isPresentationRoundRotationPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-full"
+            onClick={() => setPresentationRoundPage((current) =>
+              (current + 1) % presentationRoundPages.length
+            )}
+            aria-label="Página seguinte de rondas"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : null}
+
       {isPresentationMode && isClosingPresentationActive ? (
         <div className="relative min-h-[calc(100vh-58px)] overflow-hidden rounded-md bg-slate-950 p-3 text-white shadow-2xl max-[900px]:min-h-[calc(100vh-42px)] max-[900px]:p-2">
           {false ? (
@@ -4038,11 +4182,27 @@ export default function Nonstop() {
             </CardContent>
           </Card>
         </div>
-      <div className={cn("grid grid-cols-1 lg:grid-cols-2 gap-2", isPresentationMode && "xl:grid-cols-3 gap-1")}>
-        {Array.from({ length: displayNumRounds }).map((_, rIdx) => {
-          const roundNum = rIdx + 1;
+      <div
+        className={cn("grid grid-cols-1 lg:grid-cols-2 gap-2", isPresentationMode && "gap-1")}
+        data-testid="nonstop-rounds-grid"
+        data-paginated={presentationRoundsPaginated ? "true" : "false"}
+        data-rounds-per-page={presentationRoundsPerPage}
+      >
+        {visibleRoundNumbers.map((roundNum, visibleRoundIndex) => {
+          const shouldCenterRound = isPresentationMode && shouldCenterPresentationRound(
+            visibleRoundNumbers.length,
+            visibleRoundIndex,
+          );
           return (
-            <Card key={roundNum} className="overflow-hidden border-2 border-orange-600">
+            <div
+              key={roundNum}
+              className={cn(
+                "min-w-0",
+                shouldCenterRound && "lg:col-span-2 lg:w-1/2 lg:justify-self-center",
+              )}
+              data-testid={`presentation-round-${roundNum}`}
+            >
+            <Card className="h-full overflow-hidden border-2 border-orange-600">
               <CardHeader className={cn("bg-orange-600 text-white py-1 text-center", isPresentationMode && "py-0.5")}>
                 <CardTitle className={cn("font-np-head text-[10px] uppercase tracking-widest", isPresentationMode && "text-[9px]")}>Ronda {roundNum}</CardTitle>
               </CardHeader>
@@ -4067,10 +4227,26 @@ export default function Nonstop() {
                       const hasPlayed = scoreA !== null && scoreB !== null && (scoreA > 0 || scoreB > 0);
                       const isTeamAWinner = hasPlayed && scoreA > scoreB;
                       const isTeamBWinner = hasPlayed && scoreB > scoreA;
+                      const teamA = teams?.find((team) => team.id === matchResult?.teamAId);
+                      const teamB = teams?.find((team) => team.id === matchResult?.teamBId);
+                      const teamALabel = teamA ? getTeamOptionLabel(teamA) : "Equipa por definir";
+                      const teamBLabel = teamB ? getTeamOptionLabel(teamB) : "Equipa por definir";
                       return (
                         <TableRow key={courtNum} className={cn("h-7", isPresentationMode && "h-6 max-[900px]:h-5")}>
                           <TableCell className={cn("font-np-num text-center text-[11px] font-bold bg-slate-50 border-r px-1 py-1", isPresentationMode && "text-[10px] py-0.5 max-[900px]:text-[9px] max-[900px]:py-0")}>{courtNum}</TableCell>
                           <TableCell className={cn("w-[34%] max-w-0 px-1 py-1", isPresentationMode && "py-0.5")}>
+                            {isPresentationMode ? (
+                              <div
+                                className={cn(
+                                  "font-np-body line-clamp-2 whitespace-normal break-words px-1 text-left leading-tight",
+                                  getPresentationTeamNameClass(teamALabel),
+                                  isTeamAWinner && "font-bold",
+                                )}
+                                title={teamALabel}
+                              >
+                                {teamALabel}
+                              </div>
+                            ) : (
                             <Select 
                               value={matchResult?.teamAId?.toString()} 
                               onValueChange={(val) => {
@@ -4102,6 +4278,7 @@ export default function Nonstop() {
                                 ))}
                               </SelectContent>
                             </Select>
+                            )}
                           </TableCell>
                           <TableCell className={cn("p-0 px-1 py-1", isPresentationMode && "py-0.5")}>
                             <Input 
@@ -4137,6 +4314,18 @@ export default function Nonstop() {
                             />
                           </TableCell>
                           <TableCell className={cn("w-[34%] max-w-0 px-1 py-1", isPresentationMode && "py-0.5")}>
+                            {isPresentationMode ? (
+                              <div
+                                className={cn(
+                                  "font-np-body line-clamp-2 whitespace-normal break-words px-1 text-left leading-tight",
+                                  getPresentationTeamNameClass(teamBLabel),
+                                  isTeamBWinner && "font-bold",
+                                )}
+                                title={teamBLabel}
+                              >
+                                {teamBLabel}
+                              </div>
+                            ) : (
                             <Select 
                               value={matchResult?.teamBId?.toString()} 
                               onValueChange={(val) => {
@@ -4168,6 +4357,7 @@ export default function Nonstop() {
                                 ))}
                               </SelectContent>
                             </Select>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
@@ -4176,6 +4366,7 @@ export default function Nonstop() {
                 </Table>
               </CardContent>
             </Card>
+            </div>
           );
         })}
       </div>

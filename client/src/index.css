@@ -184,6 +184,27 @@ input::-webkit-password-toggle {
   z-index: 0;
 }
 
+/* Keep browser zoom at 100% while giving the dedicated Non Stop presentation
+ * the same effective viewport and visual scale as browser zoom at 125%.
+ * Width/height are compensated so the enlarged fixed layer still fits exactly
+ * inside the physical monitor. Smaller/mobile viewports retain their native scale. */
+.nonstop-presentation-scale {
+  --np-presentation-viewport-height: 100vh;
+}
+
+@media (min-width: 800px) {
+  @supports (zoom: 1.25) {
+    .nonstop-presentation-scale {
+      --np-presentation-viewport-height: 80vh;
+      width: 80vw;
+      height: 80vh;
+      right: auto;
+      bottom: auto;
+      zoom: 1.25;
+    }
+  }
+}
+
 .padel-overlay {
   position: absolute;
   inset: 0;

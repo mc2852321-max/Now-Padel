@@ -2953,7 +2953,7 @@ export default function Nonstop() {
       const confettiColors = ["#f97316", "#ffffff", "#fb923c", "#111827", "#fdba74"];
 
       return (
-        <div className="relative flex min-h-[calc(100vh-92px)] overflow-hidden rounded-md bg-[#050916] p-4 text-white shadow-2xl shadow-slate-950/40 ring-1 ring-white/10 max-[900px]:min-h-[calc(100vh-56px)] max-[900px]:p-2">
+        <div className="relative flex min-h-[calc(var(--np-presentation-viewport-height)-92px)] overflow-hidden rounded-md bg-[#050916] p-4 text-white shadow-2xl shadow-slate-950/40 ring-1 ring-white/10 max-[900px]:min-h-[calc(var(--np-presentation-viewport-height)-56px)] max-[900px]:p-2">
           <style>
             {`
               @keyframes np-confetti-fall {
@@ -3159,7 +3159,7 @@ export default function Nonstop() {
       );
 
       return (
-        <div className="flex h-[calc(100vh-100px)] min-h-[560px] flex-col gap-2 max-[900px]:h-[calc(100vh-62px)] max-[900px]:min-h-[500px]">
+        <div className="flex h-[calc(var(--np-presentation-viewport-height)-100px)] min-h-[448px] flex-col gap-2 max-[900px]:h-[calc(var(--np-presentation-viewport-height)-62px)] max-[900px]:min-h-[400px]">
           <Card className="overflow-hidden border-2 border-slate-800 bg-slate-100 shadow-xl">
             <CardHeader className="flex h-[clamp(30px,4vh,46px)] justify-center bg-slate-900 px-3 py-0 text-white">
               <CardTitle className="font-np-head text-center text-[clamp(12px,1.55vh,17px)] uppercase tracking-widest">
@@ -3416,7 +3416,7 @@ export default function Nonstop() {
       ref={presentationContainerRef}
       className={cn(
         "space-y-8 pb-10",
-        isPresentationMode && "fixed inset-0 z-[80] bg-background overflow-auto p-1 space-y-1 pb-1 max-[900px]:p-0.5 max-[900px]:space-y-0.5 max-[900px]:pb-0.5"
+        isPresentationMode && "nonstop-presentation-scale fixed inset-0 z-[80] bg-background overflow-auto p-1 space-y-1 pb-1 max-[900px]:p-0.5 max-[900px]:space-y-0.5 max-[900px]:pb-0.5"
       )}
     >
       <div className={cn(
@@ -4100,7 +4100,7 @@ export default function Nonstop() {
       ) : null}
 
       {isPresentationMode && isClosingPresentationActive ? (
-        <div className="relative min-h-[calc(100vh-58px)] overflow-hidden rounded-md bg-slate-950 p-3 text-white shadow-2xl max-[900px]:min-h-[calc(100vh-42px)] max-[900px]:p-2">
+        <div className="relative min-h-[calc(var(--np-presentation-viewport-height)-58px)] overflow-hidden rounded-md bg-slate-950 p-3 text-white shadow-2xl max-[900px]:min-h-[calc(var(--np-presentation-viewport-height)-42px)] max-[900px]:p-2">
           {false ? (
           <div className="mb-2 flex flex-col gap-2 border-b border-white/10 pb-2 lg:flex-row lg:items-center lg:justify-between max-[900px]:mb-1 max-[900px]:pb-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -4159,7 +4159,7 @@ export default function Nonstop() {
               animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
               exit={{ opacity: 0, y: -18, scale: 0.99, filter: "blur(4px)" }}
               transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
-              className="min-h-[calc(100vh-84px)] will-change-transform max-[900px]:min-h-[calc(100vh-50px)]"
+              className="min-h-[calc(var(--np-presentation-viewport-height)-84px)] will-change-transform max-[900px]:min-h-[calc(var(--np-presentation-viewport-height)-50px)]"
             >
               {renderSimpleClosingPresentationView()}
             </motion.div>

@@ -185,7 +185,7 @@ input::-webkit-password-toggle {
 }
 
 /* Keep browser zoom at 100% while giving the dedicated Non Stop presentation
- * the same effective visual scale as browser zoom at 125%. Chrome supports
+ * a larger dedicated presentation scale. Chrome supports
  * `zoom`, which also lets layout measurements and pagination see the larger UI. */
 .nonstop-presentation-scale {
   --np-presentation-scale: 1;
@@ -194,13 +194,13 @@ input::-webkit-password-toggle {
 }
 
 @media (min-width: 800px) {
-  @supports (zoom: 1.25) {
+  @supports (zoom: 1.6) {
     .nonstop-presentation-scale {
-      --np-presentation-scale: 1.25;
-      --np-presentation-viewport-height: 80vh;
-      --np-presentation-vh: 0.8vh;
-      width: 80vw;
-      height: 80vh;
+      --np-presentation-scale: 1.6;
+      --np-presentation-viewport-height: 62.5vh;
+      --np-presentation-vh: 0.625vh;
+      width: 62.5vw;
+      height: 62.5vh;
       right: auto;
       bottom: auto;
       zoom: var(--np-presentation-scale);
@@ -209,13 +209,13 @@ input::-webkit-password-toggle {
     }
   }
 
-  @supports not (zoom: 1.25) {
+  @supports not (zoom: 1.6) {
     .nonstop-presentation-scale {
-      --np-presentation-scale: 1.25;
-      --np-presentation-viewport-height: 80vh;
-      --np-presentation-vh: 0.8vh;
-      width: 80vw;
-      height: 80vh;
+      --np-presentation-scale: 1.6;
+      --np-presentation-viewport-height: 62.5vh;
+      --np-presentation-vh: 0.625vh;
+      width: 62.5vw;
+      height: 62.5vh;
       right: auto;
       bottom: auto;
       transform: scale(var(--np-presentation-scale));

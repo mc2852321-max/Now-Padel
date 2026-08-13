@@ -12,6 +12,7 @@ import connectPgSimple from "connect-pg-simple";
 import pg from "pg";
 import { db } from "./db.js";
 import { getWhatsappStatus, sendWhatsappMessages } from "./whatsapp.js";
+import { resolveTimerTimeLeft } from "../shared/nonstop-timer.js";
 
 const databaseUrl =
   process.env.DATABASE_URL ||
@@ -1140,14 +1141,9 @@ export async function registerRoutes(
   app.get("/api/nonstop/timer", isAuthenticated, async (_req, res) => {
     const eventId = parseEventId(_req.query.eventId);
     const timer = eventId ? await storage.getNonstopTimer(eventId) : await resolveNonstopTimerState();
-    let liveTimeLeft = timer.timeLeft;
-
-    if (!eventId && timer.isActive && timer.phaseEndsAt) {
-      liveTimeLeft = Math.max(
-        0,
-        Math.ceil((new Date(timer.phaseEndsAt).getTime() - Date.now()) / 1000),
-      );
-    }
+    const liveTimeLeft = eventId
+      ? Math.max(0, Math.floor(timer.timeLeft ?? 0))
+      : resolveTimerTimeLeft(Boolean(timer.isActive), timer.phaseEndsAt, timer.timeLeft);
 
     res.json({
       ...timer,

@@ -32,6 +32,7 @@ import { sortNonstopStandings } from "@shared/nonstop-standings";
 import { findRepeatedTeamInRound } from "@shared/nonstop-schedule";
 import { canPlayNonstopSound } from "@shared/nonstop-sound";
 import { buildPresentationRoundPages, presentationNeedsPagination, shouldCenterPresentationRound } from "@shared/nonstop-presentation";
+import { getRemainingTimerSeconds, resolveTimerTimeLeft } from "@shared/nonstop-timer";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 type TimerSound = 'start-warmup' | 'start-game' | 'end-game' | 'final';
@@ -836,10 +837,7 @@ export default function Nonstop() {
     const nextPhaseEndAt = syncedTimer.phaseEndsAt
       ? new Date(syncedTimer.phaseEndsAt).getTime()
       : null;
-    const nextTimeLeft =
-      nextIsActive && nextPhaseEndAt
-        ? Math.max(0, Math.ceil((nextPhaseEndAt - Date.now()) / 1000))
-        : Math.max(0, syncedTimer.timeLeft || 0);
+    const nextTimeLeft = resolveTimerTimeLeft(nextIsActive, nextPhaseEndAt, syncedTimer.timeLeft);
 
     setTimerState(nextTimerState);
     setIsActive(nextIsActive);
@@ -848,8 +846,15 @@ export default function Nonstop() {
     phaseEndAtRef.current = nextPhaseEndAt;
   }, [syncedTimer?.updatedAt, syncedTimer?.timeLeft]);
 
+  const refreshLocalTimerFromPhaseEnd = useCallback(() => {
+    if (!isActive || !phaseEndAtRef.current) return;
+    const remaining = getRemainingTimerSeconds(phaseEndAtRef.current);
+    setTimeLeft((prev) => (prev === remaining ? prev : remaining));
+  }, [isActive]);
+
   useEffect(() => {
     const resyncTimer = () => {
+      refreshLocalTimerFromPhaseEnd();
       queryClient.invalidateQueries({ queryKey: [timerQueryKey] });
     };
 
@@ -866,7 +871,7 @@ export default function Nonstop() {
       window.removeEventListener("focus", resyncTimer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [timerQueryKey]);
+  }, [refreshLocalTimerFromPhaseEnd, timerQueryKey]);
 
   const resolveSoundType = (
     type: TimerSound
@@ -1359,7 +1364,7 @@ export default function Nonstop() {
 
     const interval = setInterval(() => {
       if (!phaseEndAtRef.current) return;
-      const remaining = Math.max(0, Math.ceil((phaseEndAtRef.current - Date.now()) / 1000));
+      const remaining = getRemainingTimerSeconds(phaseEndAtRef.current);
       setTimeLeft((prev) => (prev === remaining ? prev : remaining));
     }, 250);
 
@@ -3414,6 +3419,7 @@ export default function Nonstop() {
   return (
     <div
       ref={presentationContainerRef}
+      data-testid="nonstop-root"
       className={cn(
         "space-y-8 pb-10",
         isPresentationMode && "nonstop-presentation-scale fixed inset-0 z-[80] bg-background overflow-auto p-1 space-y-1 pb-1 max-[900px]:p-0.5 max-[900px]:space-y-0.5 max-[900px]:pb-0.5"
@@ -3690,7 +3696,7 @@ export default function Nonstop() {
                     className={cn("order-2 h-8 w-[130px] px-3 text-[10px] border-orange-500 bg-orange-600 text-white hover:bg-orange-500 justify-center", isPresentationMode && "h-7 w-[118px] text-[9px] px-1.5 max-[900px]:h-6 max-[900px]:w-[108px] max-[900px]:text-[8px] max-[900px]:px-1")}
                     onClick={() => {
                     const remaining = phaseEndAtRef.current
-                      ? Math.max(0, Math.ceil((phaseEndAtRef.current - Date.now()) / 1000))
+                      ? getRemainingTimerSeconds(phaseEndAtRef.current)
                       : timeLeft;
                     phaseEndAtRef.current = null;
                     setTimeLeft(remaining);

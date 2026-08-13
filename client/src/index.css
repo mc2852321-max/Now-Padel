@@ -194,13 +194,13 @@ input::-webkit-password-toggle {
 }
 
 @media (min-width: 800px) {
-  @supports (zoom: 1.6) {
+  @supports (zoom: 1.76) {
     .nonstop-presentation-scale {
-      --np-presentation-scale: 1.6;
-      --np-presentation-viewport-height: 62.5vh;
-      --np-presentation-vh: 0.625vh;
-      width: 62.5vw;
-      height: 62.5vh;
+      --np-presentation-scale: 1.76;
+      --np-presentation-viewport-height: 56.818vh;
+      --np-presentation-vh: 0.56818vh;
+      width: 56.818vw;
+      height: 56.818vh;
       right: auto;
       bottom: auto;
       zoom: var(--np-presentation-scale);
@@ -209,13 +209,13 @@ input::-webkit-password-toggle {
     }
   }
 
-  @supports not (zoom: 1.6) {
+  @supports not (zoom: 1.76) {
     .nonstop-presentation-scale {
-      --np-presentation-scale: 1.6;
-      --np-presentation-viewport-height: 62.5vh;
-      --np-presentation-vh: 0.625vh;
-      width: 62.5vw;
-      height: 62.5vh;
+      --np-presentation-scale: 1.76;
+      --np-presentation-viewport-height: 56.818vh;
+      --np-presentation-vh: 0.56818vh;
+      width: 56.818vw;
+      height: 56.818vh;
       right: auto;
       bottom: auto;
       transform: scale(var(--np-presentation-scale));

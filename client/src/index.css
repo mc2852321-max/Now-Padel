@@ -185,25 +185,44 @@ input::-webkit-password-toggle {
 }
 
 /* Keep browser zoom at 100% while giving the dedicated Non Stop presentation
- * the same effective visual scale as browser zoom at 125%. The layer uses a
- * virtual 80% viewport and is transformed back up to fill the physical screen. */
+ * the same effective visual scale as browser zoom at 125%. Chrome supports
+ * `zoom`, which also lets layout measurements and pagination see the larger UI. */
 .nonstop-presentation-scale {
+  --np-presentation-scale: 1;
   --np-presentation-viewport-height: 100vh;
   --np-presentation-vh: 1vh;
 }
 
 @media (min-width: 800px) {
-  .nonstop-presentation-scale {
-    --np-presentation-viewport-height: 80vh;
-    --np-presentation-vh: 0.8vh;
-    width: 80vw;
-    height: 80vh;
-    right: auto;
-    bottom: auto;
-    transform: scale(1.25);
-    transform-origin: top left;
-    max-width: none;
-    max-height: none;
+  @supports (zoom: 1.25) {
+    .nonstop-presentation-scale {
+      --np-presentation-scale: 1.25;
+      --np-presentation-viewport-height: 80vh;
+      --np-presentation-vh: 0.8vh;
+      width: 80vw;
+      height: 80vh;
+      right: auto;
+      bottom: auto;
+      zoom: var(--np-presentation-scale);
+      max-width: none;
+      max-height: none;
+    }
+  }
+
+  @supports not (zoom: 1.25) {
+    .nonstop-presentation-scale {
+      --np-presentation-scale: 1.25;
+      --np-presentation-viewport-height: 80vh;
+      --np-presentation-vh: 0.8vh;
+      width: 80vw;
+      height: 80vh;
+      right: auto;
+      bottom: auto;
+      transform: scale(var(--np-presentation-scale));
+      transform-origin: top left;
+      max-width: none;
+      max-height: none;
+    }
   }
 }
 

@@ -674,6 +674,22 @@ export default function Nonstop() {
     });
   };
 
+  const applySyncedTimer = useCallback((timer: SyncedTimer) => {
+    const nextTimerState = timer.timerState as TimerState;
+    const nextIsActive = Boolean(timer.isActive);
+    const nextRound = Math.max(1, timer.round || 1);
+    const nextPhaseEndAt = timer.phaseEndsAt
+      ? new Date(timer.phaseEndsAt).getTime()
+      : null;
+    const nextTimeLeft = resolveTimerTimeLeft(nextIsActive, nextPhaseEndAt, timer.timeLeft);
+
+    setTimerState(nextTimerState);
+    setIsActive(nextIsActive);
+    setRound(nextRound);
+    setTimeLeft(nextTimeLeft);
+    phaseEndAtRef.current = nextPhaseEndAt;
+  }, []);
+
   useEffect(() => {
     if (!isPresentationMode || readOnlyMode) return;
 
@@ -831,20 +847,8 @@ export default function Nonstop() {
 
   useEffect(() => {
     if (!syncedTimer) return;
-    const nextTimerState = syncedTimer.timerState as TimerState;
-    const nextIsActive = Boolean(syncedTimer.isActive);
-    const nextRound = Math.max(1, syncedTimer.round || 1);
-    const nextPhaseEndAt = syncedTimer.phaseEndsAt
-      ? new Date(syncedTimer.phaseEndsAt).getTime()
-      : null;
-    const nextTimeLeft = resolveTimerTimeLeft(nextIsActive, nextPhaseEndAt, syncedTimer.timeLeft);
-
-    setTimerState(nextTimerState);
-    setIsActive(nextIsActive);
-    setRound(nextRound);
-    setTimeLeft(nextTimeLeft);
-    phaseEndAtRef.current = nextPhaseEndAt;
-  }, [syncedTimer?.updatedAt, syncedTimer?.timeLeft]);
+    applySyncedTimer(syncedTimer);
+  }, [applySyncedTimer, syncedTimer?.updatedAt, syncedTimer?.timeLeft]);
 
   const refreshLocalTimerFromPhaseEnd = useCallback(() => {
     if (!isActive || !phaseEndAtRef.current) return;
@@ -852,10 +856,28 @@ export default function Nonstop() {
     setTimeLeft((prev) => (prev === remaining ? prev : remaining));
   }, [isActive]);
 
-  useEffect(() => {
-    const resyncTimer = () => {
+  const resyncTimerFromServer = useCallback(async () => {
+    if (readOnlyMode) return;
+
+    try {
+      const res = await fetch(timerQueryKey, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`Timer resync failed: ${res.status}`);
+
+      const timer = await res.json() as SyncedTimer;
+      queryClient.setQueryData([timerQueryKey], timer);
+      applySyncedTimer(timer);
+    } catch {
       refreshLocalTimerFromPhaseEnd();
       queryClient.invalidateQueries({ queryKey: [timerQueryKey] });
+    }
+  }, [applySyncedTimer, readOnlyMode, refreshLocalTimerFromPhaseEnd, timerQueryKey]);
+
+  useEffect(() => {
+    const resyncTimer = () => {
+      void resyncTimerFromServer();
     };
 
     const onVisibilityChange = () => {
@@ -871,7 +893,7 @@ export default function Nonstop() {
       window.removeEventListener("focus", resyncTimer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [refreshLocalTimerFromPhaseEnd, timerQueryKey]);
+  }, [resyncTimerFromServer]);
 
   const resolveSoundType = (
     type: TimerSound

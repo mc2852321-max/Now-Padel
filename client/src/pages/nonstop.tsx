@@ -32,7 +32,8 @@ import { sortNonstopStandings } from "@shared/nonstop-standings";
 import { findRepeatedTeamInRound } from "@shared/nonstop-schedule";
 import { canPlayNonstopSound } from "@shared/nonstop-sound";
 import { buildPresentationRoundPages, presentationNeedsPagination, shouldCenterPresentationRound } from "@shared/nonstop-presentation";
-import { getRemainingTimerSeconds, resolveTimerTimeLeft } from "@shared/nonstop-timer";
+import { getRemainingTimerSeconds, resolveTimerTimeLeft, shouldRefreshNonstopTimerBoundary } from "@shared/nonstop-timer";
+import { startResilientTicker } from "@/lib/resilient-ticker";
 
 type TimerState = 'idle' | 'warmup' | 'game' | 'rest';
 type TimerSound = 'start-warmup' | 'start-game' | 'end-game' | 'final';
@@ -469,7 +470,9 @@ export default function Nonstop() {
     queryKey: [timerQueryKey],
     enabled: !readOnlyMode,
     refetchInterval: timerRefetchInterval,
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   const [isTeamDialogOpen, setIsTeamDialogOpen] = useState(false);
@@ -477,6 +480,7 @@ export default function Nonstop() {
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [confirmStopPresentation, setConfirmStopPresentation] = useState(false);
   const phaseEndAtRef = useRef<number | null>(null);
+  const lastTimerBoundaryRefreshRef = useRef<number | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
   const soundBusyUntilRef = useRef(0);
@@ -848,7 +852,15 @@ export default function Nonstop() {
   useEffect(() => {
     if (!syncedTimer) return;
     applySyncedTimer(syncedTimer);
-  }, [applySyncedTimer, syncedTimer?.updatedAt, syncedTimer?.timeLeft]);
+  }, [
+    applySyncedTimer,
+    syncedTimer?.updatedAt,
+    syncedTimer?.timeLeft,
+    syncedTimer?.timerState,
+    syncedTimer?.isActive,
+    syncedTimer?.round,
+    syncedTimer?.phaseEndsAt,
+  ]);
 
   const refreshLocalTimerFromPhaseEnd = useCallback(() => {
     if (!isActive || !phaseEndAtRef.current) return;
@@ -874,7 +886,6 @@ export default function Nonstop() {
       queryClient.invalidateQueries({ queryKey: [timerQueryKey] });
     }
   }, [applySyncedTimer, readOnlyMode, refreshLocalTimerFromPhaseEnd, timerQueryKey]);
-
   useEffect(() => {
     const resyncTimer = () => {
       void resyncTimerFromServer();
@@ -887,11 +898,17 @@ export default function Nonstop() {
     };
 
     window.addEventListener("focus", resyncTimer);
+    window.addEventListener("online", resyncTimer);
+    window.addEventListener("pageshow", resyncTimer);
     document.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("fullscreenchange", resyncTimer);
 
     return () => {
       window.removeEventListener("focus", resyncTimer);
+      window.removeEventListener("online", resyncTimer);
+      window.removeEventListener("pageshow", resyncTimer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      document.removeEventListener("fullscreenchange", resyncTimer);
     };
   }, [resyncTimerFromServer]);
 
@@ -1375,23 +1392,29 @@ export default function Nonstop() {
   useEffect(() => {
     if (!isActive) {
       phaseEndAtRef.current = null;
+      lastTimerBoundaryRefreshRef.current = null;
       return;
     }
-
-    if (timeLeft <= 0) return;
 
     if (!phaseEndAtRef.current) {
       phaseEndAtRef.current = Date.now() + timeLeft * 1000;
     }
 
-    const interval = setInterval(() => {
+    return startResilientTicker(() => {
       if (!phaseEndAtRef.current) return;
       const remaining = getRemainingTimerSeconds(phaseEndAtRef.current);
       setTimeLeft((prev) => (prev === remaining ? prev : remaining));
-    }, 250);
 
-    return () => clearInterval(interval);
-  }, [isActive, timeLeft]);
+      if (shouldRefreshNonstopTimerBoundary(
+        remaining,
+        phaseEndAtRef.current,
+        lastTimerBoundaryRefreshRef.current,
+      )) {
+        lastTimerBoundaryRefreshRef.current = phaseEndAtRef.current;
+        queryClient.invalidateQueries({ queryKey: [timerQueryKey] });
+      }
+    });
+  }, [isActive, timerQueryKey]);
 
   useEffect(() => {
     return () => {
